@@ -61,6 +61,7 @@ partycje NTFS.
 install -d build
 cd build
 %cmake .. \
+	-DLIB_INSTALL_DIR=%{_libdir} \
 	%{!?with_ruby:-DRUBY_OLD_VERSION=ON}
 
 %{__make}

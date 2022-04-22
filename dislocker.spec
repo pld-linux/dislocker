@@ -6,12 +6,13 @@ Summary:	Read BitLocker encrypted volumes under Linux
 Summary(pl.UTF-8):	Odczyt wolumenów szyfrowanych BitLockerem spod Linuksa
 Name:		dislocker
 Version:	0.7.3
-Release:	2
+Release:	3
 License:	GPL v2+
 Group:		Applications/File
 #Source0Download: https://github.com/Aorimn/dislocker/releases
 Source0:	https://github.com/Aorimn/dislocker/archive/v%{version}/%{name}-%{version}.tar.gz
 # Source0-md5:	ff1a5a0120cedf04c6146da91dfbd27c
+Patch0:		mbedtls.patch
 URL:		https://github.com/Aorimn/dislocker
 BuildRequires:	cmake >= 2.6
 BuildRequires:	libfuse-devel
@@ -54,6 +55,7 @@ partycje NTFS.
 
 %prep
 %setup -q
+%patch0 -p1
 
 %{__sed} -i -e '1s,/usr/bin/env ruby,/usr/bin/ruby,' src/dislocker-find.rb.in
 

@@ -6,7 +6,7 @@ Summary:	Read BitLocker encrypted volumes under Linux
 Summary(pl.UTF-8):	Odczyt wolumenów szyfrowanych BitLockerem spod Linuksa
 Name:		dislocker
 Version:	0.7.3
-Release:	4
+Release:	5
 License:	GPL v2+
 Group:		Applications/File
 #Source0Download: https://github.com/Aorimn/dislocker/tags

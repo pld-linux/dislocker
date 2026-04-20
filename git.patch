@@ -1,0 +1,2709 @@
+diff --git a/.travis.yml b/.travis.yml
+index d0ef13a..4d9d32b 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -13,18 +13,20 @@ jobs:
+     - os: linux
+       dist: xenial
+     - os: osx
++      osx_image: xcode11.6
+ 
+ before_install:
+     - echo $PATH
+     - if [ "$TRAVIS_OS_NAME" = "linux" ]; then sudo apt-get update -qq; fi
+     - if [ "$TRAVIS_OS_NAME" = "linux" ]; then sudo apt-get install -qq libfuse-dev ruby-dev libmbedtls-dev; fi
+     - if [ "$TRAVIS_OS_NAME" = "osx" ]; then brew update; fi
+-    - if [ "$TRAVIS_OS_NAME" = "osx" ]; then brew install -v Caskroom/cask/osxfuse; fi
++    - if [ "$TRAVIS_OS_NAME" = "osx" ]; then brew install -v Caskroom/cask/macfuse; fi
+     - if [ "$TRAVIS_OS_NAME" = "osx" ]; then ./src/mbed_install.sh; fi
+     - if [ "$TRAVIS_OS_NAME" = "osx" ]; then export PATH="/usr/bin:/usr/local/bin:$PATH"; fi
+ 
+ install:
+-    - cmake .
++    - if [ "$TRAVIS_OS_NAME" = "linux" ]; then cmake .; fi
++    - if [ "$TRAVIS_OS_NAME" = "osx" ]; then cmake . -DCMAKE_C_COMPILER=/usr/bin/clang; fi
+     - make VERBOSE=1
+     - sudo make install
+ 
+diff --git a/BUILD.md b/BUILD.md
+new file mode 100644
+index 0000000..f11c620
+--- /dev/null
++++ b/BUILD.md
+@@ -0,0 +1,129 @@
++# BUILDING NATIVE PACKAGES FOR DISLOCKER
++
++This document provides instructions for building native system packages (e.g., `.deb` for Debian/Ubuntu, `.rpm` for Fedora/RHEL) from the `dislocker` source code.
++
++For general compilation and installation, please see `README.md` and `INSTALL.md`.
++
++## Building for Debian / Ubuntu 22.04 LTS
++
++Ubuntu 22.04 LTS ships with **mbedTLS 2.28**, but the latest `dislocker` source code requires **mbedTLS 3.x**. The package for the new version has to be built before building dislocker.
++
++This section provides the instructions based on a fesh install of [Ubuntu 22.04.5 LTS (Jammy Jellyfish)](https://releases.ubuntu.com/jammy/ubuntu-22.04.5-desktop-amd64.iso) 64-bit PC (AMD64) desktop image.
++
++The commands can be executed in the default Terminal (GNOME Terminal).
++
++### Building mbedTLS 3.x package
++
++#### Update system and enable source repositories
++
++```bash
++sudo apt update
++sudo apt -y full-upgrade
++sudo add-apt-repository -y universe multiverse restricted
++sudo sed -i -E 's/^# deb-src ([^#]+jammy[^#]*)/deb-src \1/' /etc/apt/sources.list
++sudo apt update
++```
++
++#### Install all build tools and dependencies for mbedtls
++
++```bash
++sudo apt-get install -y \
++  build-essential devscripts debhelper equivs ubuntu-dev-tools \
++  fakeroot quilt lintian cmake pkg-config git ca-certificates \
++  curl wget python3 python3-sphinx dh-python faketime doxygen graphviz
++```
++
++#### Set Maintainer Identity
++
++Set this now to prevent warnings from uupdate and dch later.
++
++```bash
++export DEBFULLNAME="name"
++export DEBEMAIL="name@email.org"
++```
++
++#### Download and Prepare Source Files
++
++This fetches the Debian packaging files and the newer upstream source code.
++
++Create a clean workspace, get Debian's 3.6.4 source package (for its 'debian' directory), and get the upstream 3.6.5 source tarball and rename it for uupdate
++
++```bash
++mkdir -p ~/build/mbedtls && cd ~/build/mbedtls
++dget -ux https://deb.debian.org/debian/pool/main/m/mbedtls/mbedtls_3.6.4-2.dsc
++wget https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.5/mbedtls-3.6.5.tar.bz2
++mv mbedtls-3.6.5.tar.bz2 ../mbedtls_3.6.5.orig.tar.bz2
++```
++
++#### Merge New Source with Debian Packaging
++
++Use uupdate to create the final source tree for building.
++
++```bash
++cd mbedtls-3.6.4
++uupdate -v 3.6.5 ../mbedtls_3.6.5.orig.tar.bz2
++cd ../mbedtls-3.6.5
++```
++
++#### Patch debian/control for Jammy Compatibility
++
++This is the crucial step to fix the build errors. This safely removes the problematic lines.
++
++Remove the dependency on dpkg-build-api, which is too new for Jammy, and relax the required version of dpkg-dev
++
++```bash
++sed -i '/dpkg-build-api/d' debian/control
++sed -i -E 's/dpkg-dev \(>= 1\.22\.5\)/dpkg-dev/' debian/control
++```
++
++#### Finalize the Changelog
++
++Create and finalize the changelog entry for your backport. You can use `dch -r` or `nano -l debian/changelog` for editing.
++
++```bash
++dch -D jammy "Backport Mbed TLS 3.6.5 for Jammy."
++```
++
++#### Build the Packages
++
++This final step will compile everything and create the `.deb` files in the `~/build/mbedtls` directory.
++
++```bash
++debuild -b -us -uc
++```
++
++The list of 11 files that belong to the new final build are those named `*3.6.5-0ubuntu1*`:
++
++1. The Installable Packages (.deb files). These are the most important files. They are the actual software packages you can install and share.
++
++- libmbedcrypto16_3.6.5-0ubuntu1_amd64.deb
++- libmbedtls21_3.6.5-0ubuntu1_amd64.deb
++- libmbedx509-7_3.6.5-0ubuntu1_amd64.deb
++- libmbedtls-dev_3.6.5-0ubuntu1_amd64.deb
++- libmbedtls-doc_3.6.5-0ubuntu1_all.deb
++
++2. The Debug Packages (.ddeb files). These are also part of the build output, but they are only for debugging purposes.
++
++- libmbedcrypto16-dbgsym_3.6.5-0ubuntu1_amd64.ddeb
++- libmbedtls21-dbgsym_3.6.5-0ubuntu1_amd64.ddeb
++- libmbedx509-7-dbgsym_3.6.5-0ubuntu1_amd64.ddeb
++
++3. Build Information and Logs. These files document how the packages were built. They are useful for reproducibility but are not installed.
++
++- mbedtls_3.6.5-0ubuntu1_amd64.buildinfo
++- mbedtls_3.6.5-0ubuntu1_amd64.changes
++- mbedtls_3.6.5-0ubuntu1_amd64.build
++
++#### Install the mbedTLS 3.x Packages
++
++The `-dev` packages are requires to build `dislocker` later, but not to just use it. The `-doc` is just documentation.
++
++```bash
++cd ~/build/mbedtls
++sudo apt install \
++  ./libmbedcrypto16_3.6.5-0ubuntu1_amd64.deb \
++  ./libmbedtls21_3.6.5-0ubuntu1_amd64.deb \
++  ./libmbedtls-dev_3.6.5-0ubuntu1_amd64.deb \
++  ./libmbedtls-doc_3.6.5-0ubuntu1_all.deb \
++  ./libmbedx509-7_3.6.5-0ubuntu1_amd64.deb
++```
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bc8e5d4..0e085a9 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -11,7 +11,7 @@ difference.
+ - Feature improvement:
+     - Reported NTFS volume size is more accurate (thanks @haobinnan)
+     - Add ability to decrypt from a VMK file (thanks Seunghun Han)
+-    - Add ability to read the user password from the envrironment variable `DISLOCKER_PASSWORD` (thanks @mhogomchungu)
++    - Add ability to read the user password from the environment variable `DISLOCKER_PASSWORD` (thanks @mhogomchungu)
+     - Add ability to read the user password from pipes (thanks @mhogomchungu)
+     - Decryption/encryption speed has been improved by disabling faulty threading
+ 
+@@ -27,7 +27,7 @@ difference.
+     option for the offset had to be changed. It is now `-O`;
+     - dislocker on FreeBSD can now read devices, not just partition dumps.
+ 
+-- Compatiblity improvement:
++- Compatibility improvement:
+     - OSX support and dependencies have been updated;
+     - Thanks to Eric Johnson, from Leidos, a BitBake recipe is now available.
+ 
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 5753aa5..93a36e5 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -17,7 +17,7 @@
+ # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+ # USA.
+ 
+-cmake_minimum_required (VERSION 2.6)
++cmake_minimum_required (VERSION 3.5)
+ project (dislocker C)
+ 
+ set (AUTHOR "Romain Coltel")
+@@ -43,7 +43,7 @@ endif()
+ 
+ set (VERSION_MAJOR 0)
+ set (VERSION_MINOR 7)
+-set (VERSION_RELEASE 2)
++set (VERSION_RELEASE 3)
+ set (VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_RELEASE}")
+ 
+ add_subdirectory (${PROJECT_SOURCE_DIR}/src)
+diff --git a/INSTALL.md b/INSTALL.md
+index cca6c05..26ec52f 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -9,25 +9,22 @@ You need:
+ - Compiler, gcc or clang;
+ - cmake (at least version 2.6);
+ - make (or gmake, for FreeBSD);
+-- Headers for FUSE;
+-- Headers for mbedTLS (previously known as PolarSSL);
++- pkg-config;
++- Headers for FUSE3;
++- Headers for mbedTLS 3;
+ - A partition encrypted with BitLocker, from Windows Vista, 7 or 8.
+ 
+ 
+ If you have Ruby headers, the library will compile with some Ruby bindings and
+ another program - see the NOTE section below - will be available.
+ 
+-For Debian-like distos based on Debian Jessie or Ubuntu 14.04 or older:
++For Debian-like distros:
+ 
+-- `aptitude install gcc cmake make libfuse-dev libpolarssl-dev ruby-dev`
+-
+-For Debian-like distos based on Debian Stretch or Ubuntu 16.04 or later:
+-
+-- `aptitude install gcc cmake make libfuse-dev libmbedtls-dev ruby-dev`
++- `aptitude install gcc cmake make libfuse3-dev libmbedtls-dev ruby-dev pkgconf`
+ 
+ For Fedora-like:
+ 
+-- `dnf install gcc cmake make fuse-devel mbedtls-devel ruby-devel rubypick`
++- `dnf install gcc cmake make fuse-devel mbedtls3.6-devel ruby-devel rubypick`
+ 
+ Alternatively, running `dnf install dislocker fuse-dislocker` to use the
+ already existing RPM packages in Fedora could be a clever idea.
+@@ -41,11 +38,16 @@ already existing RPM packages in EPEL could be a clever idea.
+ 
+ For FreeBSD:
+ 
+-- `pkg install cmake gmake fusefs-libs mbedtls`
++- `pkg install cmake gmake fusefs-libs mbedtls3`
+ 
+ For OSX: Follow the instructions in the next section.
+ 
+-Note that the code expects at least FUSE 2.6.
++Note that the code expects at least FUSE 3.14.
++
++For macOS:
++
++Install HomeBrew https://brew.sh
++- `brew install cmake pkgconf mbedtls`
+ 
+ # INSTALLING
+ 
+@@ -56,12 +58,11 @@ Each OS type has its own section below, beware to follow yours:
+ Just install Homebrew (http://brew.sh/) and run the following commands:
+ ```
+ brew update
+-brew install Caskroom/cask/osxfuse
++brew install Caskroom/cask/macfuse
+ brew install src/dislocker.rb
+ ```
+ This will install dislocker.
+ 
+-
+ ## If you're on FreeBSD...
+ 
+ Follow the instructions below (next subsection) by replacing 'make' with 'gmake'.
+@@ -96,33 +97,6 @@ Once installed, see `dislocker(1)` for details on how to use it.
+ I'm sure you don't want to do that. But if you're really forced by someone, just
+ type `make uninstall` as super-user.
+ 
+-# mbedTLS 2.0.0
+-
+-Since the version 2.0.0 of mbedTLS, the build moves "crypto" functions such
+-as AES and SHA256 into a separate, libmbedcrypto, library. However, a typo
+-didn't installed this library, resulting in some packagers not providing this
+-library, thus breaking the dislocker compilation.
+-If you have this problem, it's recommended to run the following commands (they
+-have been put in the src/mbed_install.sh script, if you don't want to
+-copy/paste from here):
+-```
+-git clone https://github.com/ARMmbed/mbedtls.git
+-cd mbedtls
+-git checkout mbedtls-2.0.0
+-```
+-Then apply the patch given by the following command:
+-```
+-git show 6f42417b library/CMakeLists.txt
+-```
+-And compile/install the library:
+-```
+-cmake .
+-make
+-sudo make install
+-```
+-
+-You can then resume the installation where you have left it.
+-
+ # PORTABILITY
+ 
+ Globally, this was successfully tested on Linux x86/x86_64, MacOSX and FreeBSD.
+@@ -164,5 +138,3 @@ instance, if you want to compile dislocker-fuse only, you'd simply run:
+ $ cmake .
+ $ make dislocker-fuse
+ ```
+-
+-
+diff --git a/README.md b/README.md
+index 598c58e..b306883 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,6 @@
+ 
+ ## Introduction and explanations
+ 
+-
+ This software has been designed to read BitLocker encrypted partitions under a
+ Linux system. The driver has the capability to read/write on:
+  - Windows Vista, 7, 8, 8.1 and 10 encrypted partitions - that's AES-CBC,
+@@ -33,19 +32,15 @@ binary needs: the same size as the volume you're trying to decrypt.
+ Nevertheless, once the partition is decrypted, you can mount your file as any
+ NTFS partition.
+ 
+-
+ Thanks goes to Rogier Wolff for testing, hugsy for all the OSX support and
+ patches, Will Dyson for the patches, and all the people who give feedbacks.
+ 
+-
+-
+ ## Installation and requirements
+ 
+-See `INSTALL.md` for things dealing with the install process.
++See `INSTALL.md` for things dealing with the install process,
++or `BUILD.md` for building native packages for your OS.
+ Once installed, see `dislocker(1)` for details on how to use it.
+ 
+-
+-
+ ## Bugs
+ 
+ There may be bugs, and I'll be happy to hear about it!
+@@ -53,8 +48,6 @@ There may be bugs, and I'll be happy to hear about it!
+ Feel free to send comments and feedbacks to [dislocker __AT__ hsc __DOT__ fr](),
+ or to open an [issue](https://github.com/Aorimn/dislocker/issues).
+ 
+-
+-
+ ## A note on Bitlocker-To-Go
+ 
+ Microsoft's idea behind BitLocker-To-Go is that computers running Microsoft
+@@ -73,8 +66,6 @@ So, to access a  BitLocker-To-Go encrypted media, the whole partition is the
+ volume that dislocker works with. The use of dislocker is therefore the same
+ whether the volume is a standard BitLocker partition or a BitLocker-To-Go one.
+ 
+-
+-
+ ## A note on fstab
+ 
+ BitLocker partitions can be mount-ed using the /etc/fstab file and dislocker's
+@@ -84,8 +75,6 @@ The line below is an example line, which has to be adapted to each case:
+ /dev/sda2 /mnt/dislocker fuse.dislocker user-password=blah,nofail 0 0
+ ```
+ 
+-
+-
+ ## Note
+ 
+ Five binaries are built when compiling dislocker as described in the `INSTALL.md`
+diff --git a/SECURITY.md b/SECURITY.md
+new file mode 100644
+index 0000000..9fe37b2
+--- /dev/null
++++ b/SECURITY.md
+@@ -0,0 +1,33 @@
++# Security Reporting
++
++If you wish to report a security vulnerability privately, we appreciate your diligence. Please follow the guidelines below to submit your report.
++
++## Reporting
++
++To report a security vulnerability, please provide the following information:
++
++1. **PROJECT**
++   - Include the URL of the project repository - Example: <https://github.com/Aorimn/dislocker>
++
++2. **PUBLIC**
++   - Indicate whether this vulnerability has already been publicly discussed or disclosed.
++   - If so, provide relevant links.
++
++3. **DESCRIPTION**
++   - Provide a detailed description of the security vulnerability.
++   - Include as much information as possible to help us understand and address the issue.
++
++Send this information, along with any additional relevant details, to <aorimn AT gmail DOT com>.
++
++## Confidentiality
++
++We kindly ask you to keep the report confidential until a public announcement is made.
++
++## Notes
++
++- Vulnerabilities will be handled on a best-effort basis.
++- You may request an advance copy of the patched release, but we cannot guarantee early access before the public release.
++- You will be notified via email simultaneously with the public announcement.
++- We will respond within a few weeks to confirm whether your report has been accepted or rejected.
++
++Thank you for helping to improve the security of our project!
+diff --git a/cmake/FindFUSE.cmake b/cmake/FindFUSE.cmake
+index 4f7acbd..94b74cb 100644
+--- a/cmake/FindFUSE.cmake
++++ b/cmake/FindFUSE.cmake
+@@ -9,26 +9,7 @@ IF (FUSE_INCLUDE_DIRS)
+         SET (FUSE_FIND_QUIETLY TRUE)
+ ENDIF (FUSE_INCLUDE_DIRS)
+ 
+-# find includes
+-FIND_PATH (FUSE_INCLUDE_DIRS fuse.h
+-        /usr/local/include/osxfuse
+-        /usr/local/include
+-        /usr/include
+-)
++FIND_PACKAGE (PkgConfig REQUIRED)
++pkg_check_modules (FUSE REQUIRED fuse3)
+ 
+-# find lib
+-if (APPLE)
+-    SET(FUSE_NAMES libosxfuse.dylib fuse)
+-else (APPLE)
+-    SET(FUSE_NAMES fuse)
+-endif (APPLE)
+-FIND_LIBRARY(FUSE_LIBRARIES
+-        NAMES ${FUSE_NAMES}
+-        PATHS /lib64 /lib /usr/lib64 /usr/lib /usr/local/lib64 /usr/local/lib
+-)
+-
+-include ("FindPackageHandleStandardArgs")
+-find_package_handle_standard_args ("FUSE" DEFAULT_MSG
+-    FUSE_INCLUDE_DIRS FUSE_LIBRARIES)
+-
+-mark_as_advanced (FUSE_INCLUDE_DIRS FUSE_LIBRARIES)
++mark_as_advanced (FUSE_INCLUDE_DIRS FUSE_LIBRARIES FUSE_LIBRARY_DIRS)
+diff --git a/cmake/FindPolarSSL.cmake b/cmake/FindPolarSSL.cmake
+deleted file mode 100644
+index 49eeedb..0000000
+--- a/cmake/FindPolarSSL.cmake
++++ /dev/null
+@@ -1,100 +0,0 @@
+-# Try to find PolarSSL/mbedtls library
+-#
+-# Returns
+-# POLARSSL_FOUND
+-# POLARSSL_INCLUDE_DIRS
+-# POLARSSL_LIBRARIES
+-# POLARSSL_VERSION_MAJOR
+-# POLARSSL_VERSION_MINOR
+-# POLARSSL_VERSION_PATCH
+-# POLARSSL_VERSION_STRING
+-# POLARSSL_INC_FOLDER
+-# POLARSSL_REAL_NAME
+-
+-include(FindPackageHandleStandardArgs)
+-
+-find_path(POLARSSL_INCLUDE_DIRS NAMES mbedtls/ssl.h HINTS /usr/local/include)
+-set(POLARSSL_REAL_NAME MBEDTLS)
+-if( "${POLARSSL_INCLUDE_DIRS}" STREQUAL "POLARSSL_INCLUDE_DIRS-NOTFOUND")
+-  find_path(POLARSSL_INCLUDE_DIRS NAMES polarssl/ssl.h)
+-  set(POLARSSL_REAL_NAME POLARSSL)
+-endif()
+-
+-string(TOLOWER "${POLARSSL_REAL_NAME}" POLARSSL_INC_FOLDER)
+-
+-#
+-# polarssl -> mbedtls
+-# Try to find first libmbedcrypto.a, then libmbedtls.a, and if this fails tries
+-# to find polarssl.
+-# Only because mbed is separating ssl/tls functions from crypto (aes/sha)
+-# functions and some distrib (like osx or fedora) do not symbolically link
+-# libmbedtls to polarssl for compat
+-#
+-find_library(POLARSSL_LIBRARIES NAMES mbedcrypto)
+-set(POLARSSL_USED_LIBRARY mbedcrypto)
+-if( "${POLARSSL_LIBRARIES}" STREQUAL "POLARSSL_LIBRARIES-NOTFOUND" )
+-  find_library(POLARSSL_LIBRARIES NAMES mbedtls)
+-  set(POLARSSL_USED_LIBRARY mbedtls)
+-  if( "${POLARSSL_LIBRARIES}" STREQUAL "POLARSSL_LIBRARIES-NOTFOUND" )
+-    find_library(POLARSSL_LIBRARIES NAMES polarssl)
+-    set(POLARSSL_USED_LIBRARY polarssl)
+-  endif()
+-endif()
+-
+-find_package_handle_standard_args(POLARSSL REQUIRED_VARS POLARSSL_INCLUDE_DIRS POLARSSL_LIBRARIES)
+-
+-if( ${POLARSSL_LIBRARIES-NOTFOUND} )
+-  message(FATAL_ERROR "Failed to get info from PolarSSL library, check your PolarSSL installation")
+-  set(POLARSSL_FOUND False)
+-  return()
+-endif()
+-
+-if( NOT CMAKE_CROSSCOMPILING )
+-  execute_process(
+-    COMMAND echo "#include <${POLARSSL_INC_FOLDER}/version.h>\n#include <stdio.h>\nint main(){printf(${POLARSSL_REAL_NAME}_VERSION_STRING);return 0;}"
+-    OUTPUT_FILE a.c
+-  )
+-  execute_process(
+-    COMMAND ${CMAKE_C_COMPILER} a.c -I${POLARSSL_INCLUDE_DIRS} ${POLARSSL_LIBRARIES}
+-  )
+-  execute_process(
+-    COMMAND ./a.out
+-    OUTPUT_VARIABLE POLARSSL_VERSION_STRING
+-  )
+-  execute_process(
+-    COMMAND ${CMAKE_COMMAND} -E remove a.c a.out
+-  )
+-else()
+-  execute_process(
+-    COMMAND grep -w "MBEDTLS_VERSION_STRING" ${POLARSSL_INCLUDE_DIRS}/${POLARSSL_INC_FOLDER}/version.h
+-    COMMAND sed -e "s@\s\+@ @g"
+-    COMMAND cut -d\  -f3
+-    COMMAND sed -e "s@\"@@g"
+-    OUTPUT_VARIABLE POLARSSL_VERSION_STRING
+-  )
+-endif()
+-
+-message("PolarSSL/mbedTLS version: " ${POLARSSL_VERSION_STRING})
+-
+-if( "${POLARSSL_VERSION_STRING}" STREQUAL "2.0.0" AND NOT "${POLARSSL_USED_LIBRARY}" STREQUAL "mbedcrypto" )
+-  message("*** WARNING *** Your mbedTLS version is 2.0.0, it's possible the `make' command doesn't work.\nPlease refer to the INSTALL.md's \"mbedTLS 2.0.0\" section if you have any problem.\n")
+-endif()
+-
+-string(REPLACE "." ";" POLARSSL_VERSION_LIST ${POLARSSL_VERSION_STRING})
+-
+-list(GET ${POLARSSL_VERSION_LIST} 0 POLARSSL_VERSION_MAJOR)
+-list(GET ${POLARSSL_VERSION_LIST} 1 POLARSSL_VERSION_MINOR)
+-list(GET ${POLARSSL_VERSION_LIST} 2 POLARSSL_VERSION_PATCH)
+-
+-set(POLARSSL_FOUND True)
+-mark_as_advanced(
+-  POLARSSL_FOUND
+-  POLARSSL_INCLUDE_DIRS
+-  POLARSSL_LIBRARIES
+-  POLARSSL_VERSION_MAJOR
+-  POLARSSL_VERSION_MINOR
+-  POLARSSL_VERSION_PATCH
+-  POLARSSL_VERSION_STRING
+-  POLARSSL_INC_FOLDER
+-  POLARSSL_REAL_NAME
+-  )
+diff --git a/include/dislocker/common.h b/include/dislocker/common.h
+index 2c3d4ec..1a2286b 100644
+--- a/include/dislocker/common.h
++++ b/include/dislocker/common.h
+@@ -86,4 +86,6 @@ VALUE rb_hexdump(uint8_t* data, size_t data_len);
+ 
+ #endif /* _HAVE_RUBY */
+ 
++size_t strlen_utf16(char* data, size_t max_length);
++
+ #endif // COMMON_H
+diff --git a/include/dislocker/dislocker.h b/include/dislocker/dislocker.h
+index 4708e6c..6082001 100644
+--- a/include/dislocker/dislocker.h
++++ b/include/dislocker/dislocker.h
+@@ -102,4 +102,3 @@ int get_fvevol_fd(dis_context_t dis_ctx);
+ 
+ 
+ #endif /* DISLOCKER_MAIN_H */
+-
+diff --git a/include/dislocker/encryption/decrypt.h b/include/dislocker/encryption/decrypt.h
+index 05341b5..7e98119 100644
+--- a/include/dislocker/encryption/decrypt.h
++++ b/include/dislocker/encryption/decrypt.h
+@@ -76,4 +76,3 @@ int decrypt_sector(dis_crypt_t crypt, uint8_t* sector, off_t sector_address, uin
+ 
+ 
+ #endif /* DECRYPT_H */
+-
+diff --git a/include/dislocker/metadata/datums.h b/include/dislocker/metadata/datums.h
+index d092030..6985a6f 100644
+--- a/include/dislocker/metadata/datums.h
++++ b/include/dislocker/metadata/datums.h
+@@ -42,7 +42,7 @@
+ /**
+  * Here stand datums' value types stuff
+  */
+-#define NB_DATUMS_VALUE_TYPES 22
++#define NB_DATUMS_VALUE_TYPES 20
+ 
+ enum value_types
+ {
+@@ -353,8 +353,6 @@ static const print_datum_f print_datum_tab[NB_DATUMS_VALUE_TYPES] =
+ 	print_datum_generic,
+ 	print_datum_generic,
+ 	print_datum_generic,
+-	print_datum_generic,
+-	print_datum_generic,
+ };
+ 
+ 
+diff --git a/include/dislocker/metadata/extended_info.h b/include/dislocker/metadata/extended_info.h
+index cdbaf65..aa0fe0f 100644
+--- a/include/dislocker/metadata/extended_info.h
++++ b/include/dislocker/metadata/extended_info.h
+@@ -32,6 +32,7 @@
+  * This structure is new to Windows 8
+  * It's the virtualization datum's payload
+  */
++#pragma pack (1)
+ typedef struct _extended_info {
+ 	uint16_t unknown1;
+ 	uint16_t size;
+@@ -41,7 +42,12 @@ typedef struct _extended_info {
+ 	uint32_t convertlog_size;
+ 	uint32_t sector_size1;
+ 	uint32_t sector_size2;
++	uint32_t unknown3[6];
++	uint64_t FVE2_da392a22_addr;
++	uint32_t FVE2_da392a22_size;
++	uint32_t unknown4;
+ } extended_info_t;
++#pragma pack ()
+ 
+ 
+ 
+diff --git a/include/dislocker/metadata/guid.h b/include/dislocker/metadata/guid.h
+index 44cb426..1443a0b 100644
+--- a/include/dislocker/metadata/guid.h
++++ b/include/dislocker/metadata/guid.h
+@@ -46,4 +46,3 @@ void Init_guid(VALUE rb_mDislockerMetadata);
+ 
+ 
+ #endif // GUID_H
+-
+diff --git a/include/dislocker/metadata/metadata.h b/include/dislocker/metadata/metadata.h
+index 480ff87..287aac6 100644
+--- a/include/dislocker/metadata/metadata.h
++++ b/include/dislocker/metadata/metadata.h
+@@ -92,5 +92,6 @@ uint64_t dis_metadata_mftmirror(dis_metadata_t dis_meta);
+ 
+ uint32_t dis_metadata_backup_sectors_count(dis_metadata_t dis_meta);
+ 
++int dis_metadata_is_decrypted_state(dis_metadata_t dis_meta);
+ 
+ #endif // METADATA_H
+diff --git a/include/dislocker/metadata/metadata_config.h b/include/dislocker/metadata/metadata_config.h
+index b33ba42..b89e729 100644
+--- a/include/dislocker/metadata/metadata_config.h
++++ b/include/dislocker/metadata/metadata_config.h
+@@ -51,6 +51,9 @@ struct _dis_metadata_config {
+ 	/* States dislocker's metadata initialisation is at or will be stopped at */
+ 	dis_state_e   curr_state;
+ 	dis_state_e   init_stop_at;
++
++	/* Readonly mode for EOW support */
++	int readonly;
+ };
+ 
+ 
+diff --git a/include/dislocker/metadata/vmk.h b/include/dislocker/metadata/vmk.h
+index 730f11e..ae4e03f 100644
+--- a/include/dislocker/metadata/vmk.h
++++ b/include/dislocker/metadata/vmk.h
+@@ -36,7 +36,7 @@ int get_vmk_from_clearkey(dis_metadata_t dis_meta, void** vmk_datum);
+ 
+ int get_vmk_datum_from_guid(dis_metadata_t dis_meta, guid_t guid, void** vmk_datum);
+ 
+-int get_vmk_datum_from_range(dis_metadata_t dis_meta, uint16_t min_range, uint16_t max_range, void** vmk_datum);
++int get_vmk_datum_from_range(dis_metadata_t dis_meta, uint16_t min_range, uint16_t max_range, void** vmk_datum, void* prev_vmk_datum);
+ 
+ int get_vmk(datum_aes_ccm_t* vmk_datum, uint8_t* recovery_key,
+             size_t key_size, datum_key_t** vmk);
+diff --git a/include/dislocker/ntfs/encoding.h b/include/dislocker/ntfs/encoding.h
+index 8f34940..300f4c0 100644
+--- a/include/dislocker/ntfs/encoding.h
++++ b/include/dislocker/ntfs/encoding.h
+@@ -38,5 +38,11 @@ int asciitoutf16(const uint8_t* ascii, uint16_t* utf16);
+ 
+ int utf16bigtolittleendian(uint16_t* utf16, size_t utf16_length);
+ 
++int toutf16(const uint8_t* inbuffer, uint8_t* outbuffer);
++
++char* getlocalcharset();
++
++char** buildcharactersetslist(void);
++
+ 
+ #endif /* ENCODING_H */
+diff --git a/include/dislocker/ssl_bindings.h.in b/include/dislocker/ssl_bindings.h
+similarity index 68%
+rename from include/dislocker/ssl_bindings.h.in
+rename to include/dislocker/ssl_bindings.h
+index c1990b2..0f17146 100644
+--- a/include/dislocker/ssl_bindings.h.in
++++ b/include/dislocker/ssl_bindings.h
+@@ -24,38 +24,12 @@
+ #define SSL_BINDINGS_H
+ 
+ /*
+- * Here stand the bindings for polarssl SHA256/SHA2/SHA-2 function for dislocker
++ * Here stand the bindings for MbedTLS SHA256/SHA2/SHA-2 function for dislocker
+  */
+-#include "@POLARSSL_INC_FOLDER@/config.h"
+-#include "@POLARSSL_INC_FOLDER@/version.h"
+-#include "@POLARSSL_INC_FOLDER@/aes.h"
+-
+-// Function's name changed
+-#if defined(MBEDTLS_SHA256_C)
+-#  include "mbedtls/sha256.h"
+-#  if MBEDTLS_VERSION_NUMBER >= 0x02070000
+-#    define SHA256(input, len, output)         mbedtls_sha256_ret(input, len, output, 0)
+-#  else
+-#    define SHA256(input, len, output)         mbedtls_sha256(input, len, output, 0)
+-#  endif /* POLARSSL_VERSION_NUMBER >= 0x02070000 */
+-#else /* defined(MBEDTLS_SHA256_C) */
+-
+-#  if defined(POLARSSL_SHA256_C)
+-#    include "polarssl/sha256.h"
+-#    define SHA256(input, len, output)       sha256(input, len, output, 0)
+-#  else /* defined(POLARSSL_SHA256_C) */
+-#    include "polarssl/sha2.h"
+-
+-// 0x00630500 = version 0.99.5, argument's type changed in this release
+-#    if POLARSSL_VERSION_NUMBER >= 0x00630500
+-#     define SHA256(input, len, output)       sha2(input, len, output, 0)
+-#    else
+-#     define SHA256(input, len, output)       sha2(input, (int)len, output, 0)
+-#    endif /* POLARSSL_VERSION_NUMBER >= 0x00630500 */
+-
+-#  endif /* defined(POLARSSL_SHA256_C) */
+-#endif /* defined(MBEDTLS_SHA256_C) */
++#include "mbedtls/aes.h"
++#include "mbedtls/sha256.h"
+ 
++#define SHA256(input, len, output)        mbedtls_sha256(input, len, output, 0)
+ 
+ /* Here stand the bindings for AES functions and contexts */
+ #if defined(MBEDTLS_AES_H)
+diff --git a/man/linux/dislocker-file.1 b/man/linux/dislocker-file.1
+index 9f1f051..0d975f0 100644
+--- a/man/linux/dislocker-file.1
++++ b/man/linux/dislocker-file.1
+@@ -2,7 +2,7 @@
+ .\"
+ .TH DISLOCKER 1 2011-09-07 "Linux" "DISLOCKER"
+ .SH NAME
+-Dislocker file - Read BitLocker encrypted volumes under Linux, OSX and FreeBSD.
++Dislocker-file \- Read BitLocker encrypted volumes under Linux, OSX and FreeBSD.
+ .SH SYNOPSIS
+ dislocker-file [-hqrsv] [-l \fILOG_FILE\fR] [-O \fIOFFSET\fR] [-V \fIVOLUME\fR \fIDECRYPTMETHOD\fR -F[\fIN\fR]] [--] \fINTFS_FILE\fR
+ 
+@@ -16,7 +16,7 @@ This NTFS file won't have any link with the original BitLocker encrypted partiti
+ .SH OPTIONS
+ For program's options description, see dislocker-fuse(1). The only change in the command line is the last argument, which in this case is the \fINTFS_FILE\fR argument:
+ .PP
+-.TB
++.TP
+ .B NTFS_FILE
+ the newly created file where NTFS data will be put to, once decrypted from the BitLocker encrypted volume.
+ .SH EXAMPLES
+diff --git a/man/linux/dislocker-find.1 b/man/linux/dislocker-find.1
+index 079ce8f..0601e16 100644
+--- a/man/linux/dislocker-find.1
++++ b/man/linux/dislocker-find.1
+@@ -2,7 +2,7 @@
+ .\"
+ .TH DISLOCKER-FIND 1 2011-09-07 "Linux" "DISLOCKER-FIND"
+ .SH NAME
+-Dislocker find - Find BitLocker-encrypted volumes.
++Dislocker-find \- Find BitLocker-encrypted volumes.
+ .SH SYNOPSIS
+ dislocker-find [-h] [files...]
+ .SH DESCRIPTION
+diff --git a/man/linux/dislocker-fuse.1 b/man/linux/dislocker-fuse.1
+index 9787c1d..59e04d0 100644
+--- a/man/linux/dislocker-fuse.1
++++ b/man/linux/dislocker-fuse.1
+@@ -2,7 +2,7 @@
+ .\"
+ .TH DISLOCKER-FUSE 1 2011-09-07 "Linux" "DISLOCKER-FUSE"
+ .SH NAME
+-Dislocker fuse - Read/write BitLocker encrypted volumes under Linux, OSX and FreeBSD.
++Dislocker-fuse \- Read/write BitLocker encrypted volumes under Linux, OSX and FreeBSD.
+ .SH SYNOPSIS
+ dislocker-fuse [-hqrsv] [-l \fILOG_FILE\fR] [-O \fIOFFSET\fR] [-V \fIVOLUME\fR \fIDECRYPTMETHOD\fR -F[\fIN\fR]] [-- \fIARGS\fR...]
+ 
+@@ -53,7 +53,7 @@ do NOT display any information.
+ This option has priority on any previous `\fB-v\fR'. One probably wants to check the return value of the program when using this option
+ .TP
+ .B -r, --readonly
+-do not allow to write on the BitLocker volume (read only mode)
++do not allow one to write on the BitLocker volume (read only mode)
+ .TP
+ .B -s, --stateok
+ do not check the volume's state, assume it's ok to mount it.
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index bd854d2..d0a8ab4 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -17,8 +17,6 @@
+ # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+ # USA.
+ 
+-set(_Ruby_DEBUG_OUTPUT ON)
+-
+ if("${CMAKE_SOURCE_DIR}" MATCHES "src/?$")
+ 	message(FATAL_ERROR "\nPlease execute cmake from the directory above, not the src/ directory.")
+ 	return()
+@@ -92,11 +90,11 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+ 	# Don't use `-read_only_relocs' here as it seems to only work for 32 bits
+ 	# binaries
+ 	set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-bind_at_load")
+-	set (FUSE_LIB osxfuse_i64)
++	# Library for libiconv
++	set (LIB ${LIB} iconv)
+ else()
+ 	# Useless warnings when used within Darwin
+ 	set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wconversion")
+-	set (FUSE_LIB fuse)
+ 	if("${CMAKE_SYSTEM_NAME}" STREQUAL "FreeBSD")
+ 		link_directories ( ${LINK_DIRECTORIES} /usr/local/lib )
+ 	endif()
+@@ -120,27 +118,45 @@ endif()
+ # Libraries
+ set (CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+ 
+-find_package (PolarSSL REQUIRED)
+-if(POLARSSL_FOUND  AND  POLARSSL_INCLUDE_DIRS  AND  POLARSSL_LIBRARIES)
+-	include_directories (${POLARSSL_INCLUDE_DIRS})
+-	set (LIB ${LIB} ${POLARSSL_LIBRARIES})
+-	configure_file (${PROJECT_SOURCE_DIR}/include/dislocker/ssl_bindings.h.in ${PROJECT_SOURCE_DIR}/include/dislocker/ssl_bindings.h ESCAPE_QUOTES @ONLY)
++find_package (MbedTLS 3 REQUIRED)
++set (LIB ${LIB} MbedTLS::mbedcrypto)
++
++# Ruby bindings
++set(WITH_RUBY "AUTO" CACHE STRING "Enable Ruby bindings. Valid values are ON, OFF, or AUTO")
++if (NOT "${WITH_RUBY}" STREQUAL "OFF")
++	set(_Ruby_DEBUG_OUTPUT ON)
++	find_package (Ruby)
++	if(RUBY_FOUND  AND  RUBY_INCLUDE_DIRS  AND  RUBY_LIBRARY)
++		include_directories(${RUBY_INCLUDE_DIRS})
++		set(LIB ${LIB} ${RUBY_LIBRARY})
++		add_definitions(-D_HAVE_RUBY=${RUBY_VERSION_STRING})
++		set(SOURCES ${SOURCES} ruby.c)
++	elseif("${WITH_RUBY}" STREQUAL "ON")
++		message(FATAL_ERROR "Ruby bindings requested, but Ruby could not found")
++	else()
++		message("Ruby not found, Ruby bindings will be disabled")
++	endif()
+ else()
+-	return ()
+-endif()
+-
+-find_package (Ruby)
+-if(RUBY_FOUND  AND  RUBY_INCLUDE_DIRS  AND  RUBY_LIBRARY)
+-	include_directories (${RUBY_INCLUDE_DIRS})
+-	set (LIB ${LIB} ${RUBY_LIBRARY})
+-	add_definitions (-D_HAVE_RUBY=${RUBY_VERSION_STRING})
+-	set (SOURCES ${SOURCES} ruby.c)
++	message("Ruby bindings disabled by user request")
+ endif()
+ 
+-find_package (FUSE)
+-if(FUSE_FOUND  AND  FUSE_INCLUDE_DIRS  AND  FUSE_LIBRARIES)
+-	include_directories (${FUSE_INCLUDE_DIRS})
+-	set (LIB ${LIB} ${FUSE_LIBRARIES})
++# FUSE
++# Unlike Ruby which is largely optional, the primary use-case of Dislocker depends on FUSE,
++# so fail when its not found unless explicitly disabled by the user.
++option(WITH_FUSE "Enable FUSE support. Required for mounting BitLocker-encrypted volumes" ON)
++if(WITH_FUSE)
++	find_package (FUSE)
++	if(FUSE_FOUND  AND  FUSE_INCLUDE_DIRS  AND  FUSE_LIBRARIES)
++		include_directories (${FUSE_INCLUDE_DIRS})
++		if(FUSE_LIBRARY_DIRS)
++			link_directories(${FUSE_LIBRARY_DIRS})
++		endif()
++		set (LIB ${LIB} ${FUSE_LIBRARIES})
++	else()
++		message(FATAL_ERROR "FUSE not found. Please install FUSE, or configure Dislocker with -DWITH_FUSE=OFF")
++	endif()
++else()
++	message(WARNING "FUSE support is disabled, Dislocker will be unable to mount BitLocker-encrypted volumes!")
+ endif()
+ 
+ # Places
+@@ -199,18 +215,22 @@ endif()
+ 
+ set (CLEAN_FILES "")
+ 
+-set (BIN_FUSE ${PROJECT_NAME}-fuse)
+-add_executable (${BIN_FUSE} ${BIN_FUSE}.c)
+-target_link_libraries (${BIN_FUSE} ${FUSE_LIB} ${PROJECT_NAME})
+-set_target_properties (${BIN_FUSE} PROPERTIES COMPILE_DEFINITIONS FUSE_USE_VERSION=26)
+-set_target_properties (${BIN_FUSE} PROPERTIES LINK_FLAGS "-pie -fPIE")
+-add_custom_command (TARGET ${BIN_FUSE} POST_BUILD
+-	COMMAND mkdir -p ${CMAKE_BINARY_DIR}/man/
+-	COMMAND gzip -c ${DIS_MAN}/${BIN_FUSE}.1 > ${CMAKE_BINARY_DIR}/man/${BIN_FUSE}.1.gz
+-)
+-set (CLEAN_FILES ${CLEAN_FILES} ${CMAKE_BINARY_DIR}/man/${BIN_FUSE}.1.gz)
+-install (TARGETS ${BIN_FUSE} RUNTIME DESTINATION "${bindir}")
+-install (FILES ${CMAKE_BINARY_DIR}/man/${BIN_FUSE}.1.gz DESTINATION "${mandir}/man1")
++if(FUSE_FOUND)
++	set (BIN_FUSE ${PROJECT_NAME}-fuse)
++	add_executable (${BIN_FUSE} ${BIN_FUSE}.c)
++	target_link_libraries (${BIN_FUSE} ${FUSE_LIBBRARIES} ${PROJECT_NAME})
++	set_target_properties (${BIN_FUSE} PROPERTIES COMPILE_DEFINITIONS FUSE_USE_VERSION=314)
++	set_target_properties (${BIN_FUSE} PROPERTIES LINK_FLAGS "-pie -fPIE")
++	add_custom_command (TARGET ${BIN_FUSE} POST_BUILD
++		COMMAND mkdir -p ${CMAKE_BINARY_DIR}/man/
++		COMMAND gzip -c ${DIS_MAN}/${BIN_FUSE}.1 > ${CMAKE_BINARY_DIR}/man/${BIN_FUSE}.1.gz
++	)
++	set (CLEAN_FILES ${CLEAN_FILES} ${CMAKE_BINARY_DIR}/man/${BIN_FUSE}.1.gz)
++	install (TARGETS ${BIN_FUSE} RUNTIME DESTINATION "${bindir}")
++	install (FILES ${CMAKE_BINARY_DIR}/man/${BIN_FUSE}.1.gz DESTINATION "${mandir}/man1")
++	install (CODE "execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink ${BIN_FUSE} \"\$ENV{DESTDIR}${bindir}/${PROJECT_NAME}\")")
++	install (CODE "execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink ${BIN_FUSE}.1.gz \"\$ENV{DESTDIR}${mandir}/man1/${PROJECT_NAME}.1.gz\")")
++endif()
+ 
+ set (BIN_FILE ${PROJECT_NAME}-file)
+ add_executable (${BIN_FILE} ${BIN_FILE}.c)
+@@ -256,9 +276,6 @@ else()
+ 	set (BIN_FIND true)
+ endif()
+ 
+-install (CODE "execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink ${BIN_FUSE} \"\$ENV{DESTDIR}${bindir}/${PROJECT_NAME}\")")
+-install (CODE "execute_process (COMMAND ${CMAKE_COMMAND} -E create_symlink ${BIN_FUSE}.1.gz \"\$ENV{DESTDIR}${mandir}/man1/${PROJECT_NAME}.1.gz\")")
+-
+ set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${CLEAN_FILES}")
+ 
+ # Travis' test target
+diff --git a/src/accesses/bek/Makefile b/src/accesses/bek/Makefile
+index 2bb8c97..529dbc0 100644
+--- a/src/accesses/bek/Makefile
++++ b/src/accesses/bek/Makefile
+@@ -62,5 +62,3 @@ library : read_bekfile.o
+ clean :
+ 	@$(MAKE) -C ../../ clean
+ 	rm -rf -- $(BIN) *.o *~ *.swp *.gcno *.gcda *.gcov
+-
+-
+diff --git a/src/accesses/rp/recovery_password.c b/src/accesses/rp/recovery_password.c
+index f9891eb..31006a6 100644
+--- a/src/accesses/rp/recovery_password.c
++++ b/src/accesses/rp/recovery_password.c
+@@ -70,6 +70,7 @@ int get_vmk_from_rp2(dis_metadata_t dis_meta, uint8_t* recovery_password,
+ 	uint8_t salt[16] = {0,};
+ 
+ 	int result = FALSE;
++	void* prev_vmk_datum = NULL;
+ 
+ 	/* If the recovery password wasn't provide, ask for it */
+ 	if(!recovery_password)
+@@ -84,99 +85,102 @@ int get_vmk_from_rp2(dis_metadata_t dis_meta, uint8_t* recovery_password,
+ 	                (char *)recovery_password);
+ 
+ 
+-	/*
+-	 * We need a salt contained in the VMK datum associated to the recovery
+-	 * password, so go get this salt and the VMK datum first
+-	 * We use here the range which should be upper (or equal) than 0x800
+-	 */
+-	if(!get_vmk_datum_from_range(dis_meta, 0x800, 0xfff, (void**) vmk_datum))
+-	{
+-		dis_printf(
+-			L_ERROR,
+-			"Error, can't find a valid and matching VMK datum. Abort.\n"
+-		);
+-		*vmk_datum = NULL;
+-		return FALSE;
+-	}
+-
++	while (!result) {
++		/*
++		* We need a salt contained in the VMK datum associated to the recovery
++		* password, so go get this salt and the VMK datum first
++		* We use here the range which should be upper (or equal) than 0x800
++		*/
++		if(!get_vmk_datum_from_range(dis_meta, 0x800, 0xfff, (void**) vmk_datum, prev_vmk_datum))
++		{
++			dis_printf(
++				L_ERROR,
++				"Error, can't find a valid and matching VMK datum. Abort.\n"
++			);
++			*vmk_datum = NULL;
++			return FALSE;
++		}
++		prev_vmk_datum = *vmk_datum;
++
++
++		/*
++		* We have the datum containing other data, so get in there and take the
++		* nested one with type 3 (stretch key)
++		*/
++		void* stretch_datum = NULL;
++		if(!get_nested_datumvaluetype(
++				*vmk_datum,
++				DATUMS_VALUE_STRETCH_KEY,
++				&stretch_datum
++			) ||
++		!stretch_datum)
++		{
++			char* type_str = datumvaluetypestr(DATUMS_VALUE_STRETCH_KEY);
++			dis_printf(
++				L_ERROR,
++				"Error looking for the nested datum of type %hd (%s) in the VMK one"
++				". Internal failure, abort.\n",
++				DATUMS_VALUE_STRETCH_KEY,
++				type_str
++			);
++			dis_free(type_str);
++			*vmk_datum = NULL;
++			return FALSE;
++		}
+ 
+-	/*
+-	 * We have the datum containing other data, so get in there and take the
+-	 * nested one with type 3 (stretch key)
+-	 */
+-	void* stretch_datum = NULL;
+-	if(!get_nested_datumvaluetype(
+-			*vmk_datum,
+-			DATUMS_VALUE_STRETCH_KEY,
+-			&stretch_datum
+-		) ||
+-	   !stretch_datum)
+-	{
+-		char* type_str = datumvaluetypestr(DATUMS_VALUE_STRETCH_KEY);
+-		dis_printf(
+-			L_ERROR,
+-			"Error looking for the nested datum of type %hd (%s) in the VMK one"
+-			". Internal failure, abort.\n",
+-			DATUMS_VALUE_STRETCH_KEY,
+-			type_str
+-		);
+-		dis_free(type_str);
+-		*vmk_datum = NULL;
+-		return FALSE;
+-	}
+ 
++		/* The salt is in here, don't forget to keep it somewhere! */
++		memcpy(salt, ((datum_stretch_key_t*) stretch_datum)->salt, 16);
+ 
+-	/* The salt is in here, don't forget to keep it somewhere! */
+-	memcpy(salt, ((datum_stretch_key_t*) stretch_datum)->salt, 16);
+ 
++		/* Get data which can be decrypted with this password */
++		void* aesccm_datum = NULL;
++		if(!get_nested_datumvaluetype(
++				*vmk_datum,
++				DATUMS_VALUE_AES_CCM,
++				&aesccm_datum
++			) ||
++		!aesccm_datum)
++		{
++			dis_printf(
++				L_ERROR,
++				"Error finding the AES_CCM datum including the VMK. "
++				"Internal failure, abort.\n"
++			);
++			*vmk_datum = NULL;
++			return FALSE;
++		}
+ 
+-	/* Get data which can be decrypted with this password */
+-	void* aesccm_datum = NULL;
+-	if(!get_nested_datumvaluetype(
+-			*vmk_datum,
+-			DATUMS_VALUE_AES_CCM,
+-			&aesccm_datum
+-		) ||
+-	   !aesccm_datum)
+-	{
+-		dis_printf(
+-			L_ERROR,
+-			"Error finding the AES_CCM datum including the VMK. "
+-			"Internal failure, abort.\n"
+-		);
+-		*vmk_datum = NULL;
+-		return FALSE;
+-	}
+ 
++		/*
++		* We have all the things we need to compute the intermediate key from
++		* the recovery password, so do it!
++		*/
++		recovery_key = dis_malloc(32 * sizeof(uint8_t));
+ 
+-	/*
+-	 * We have all the things we need to compute the intermediate key from
+-	 * the recovery password, so do it!
+-	 */
+-	recovery_key = dis_malloc(32 * sizeof(uint8_t));
++		if(!intermediate_key(recovery_password, salt, recovery_key))
++		{
++			dis_printf(
++				L_ERROR,
++				"Error computing the recovery password to the recovery key. "
++				"Abort.\n"
++			);
++			*vmk_datum = NULL;
++			dis_free(recovery_key);
++			return FALSE;
++		}
+ 
+-	if(!intermediate_key(recovery_password, salt, recovery_key))
+-	{
+-		dis_printf(
+-			L_ERROR,
+-			"Error computing the recovery password to the recovery key. "
+-			"Abort.\n"
++		/* As the computed key length is always the same, use a direct value */
++		result = get_vmk(
++			(datum_aes_ccm_t*) aesccm_datum,
++			recovery_key,
++			32,
++			(datum_key_t**) vmk_datum
+ 		);
+-		*vmk_datum = NULL;
++
+ 		dis_free(recovery_key);
+-		return FALSE;
+ 	}
+ 
+-	/* As the computed key length is always the same, use a direct value */
+-	result = get_vmk(
+-		(datum_aes_ccm_t*) aesccm_datum,
+-		recovery_key,
+-		32,
+-		(datum_key_t**) vmk_datum
+-	);
+-
+-	dis_free(recovery_key);
+-
+ 	return result;
+ }
+ 
+@@ -393,7 +397,7 @@ int intermediate_key(const uint8_t *recovery_password,
+ 
+ 	memclean(iresult, INTERMEDIATE_KEY_LENGTH * sizeof(uint8_t));
+ 
+-	/* We successfuly retrieve the key! */
++	/* We successfully retrieve the key! */
+ 	return TRUE;
+ } // End intermediate_key
+ 
+@@ -590,5 +594,3 @@ void print_intermediate_key(uint8_t *result_key)
+ 
+ 	dis_printf(L_INFO, "Intermediate recovery key:\n\t%s\n", s);
+ }
+-
+-
+diff --git a/src/accesses/stretch_key.c b/src/accesses/stretch_key.c
+index 0189989..cdc95c5 100644
+--- a/src/accesses/stretch_key.c
++++ b/src/accesses/stretch_key.c
+@@ -157,4 +157,3 @@ static int stretch_key(bitlocker_chain_hash_t* ch, uint8_t *result)
+ 
+ 	return TRUE;
+ }
+-
+diff --git a/src/accesses/user_pass/Makefile b/src/accesses/user_pass/Makefile
+index 542c790..76a56b9 100644
+--- a/src/accesses/user_pass/Makefile
++++ b/src/accesses/user_pass/Makefile
+@@ -73,4 +73,3 @@ library : user_pass.o
+ clean :
+ 	@$(MAKE) -C ../../ clean
+ 	rm -rf -- $(BIN) *.o *~ *.swp *.gcno *.gcda *.gcov
+-
+diff --git a/src/accesses/user_pass/user_pass.c b/src/accesses/user_pass/user_pass.c
+index b3f31fa..21c45bf 100644
+--- a/src/accesses/user_pass/user_pass.c
++++ b/src/accesses/user_pass/user_pass.c
+@@ -89,7 +89,7 @@ int get_vmk_from_user_pass2(dis_metadata_t dis_meta,
+ 	 * There may be another mean to find the correct datum, but I don't see
+ 	 * another one here
+ 	 */
+-	if(!get_vmk_datum_from_range(dis_meta, 0x2000, 0x2000, (void**) vmk_datum))
++	if(!get_vmk_datum_from_range(dis_meta, 0x2000, 0x2000, (void**) vmk_datum, NULL))
+ 	{
+ 		dis_printf(
+ 			L_ERROR,
+@@ -256,32 +256,54 @@ int user_key(const uint8_t *user_password,
+ 	}
+ 
+ 
+-	uint16_t* utf16_password = NULL;
+-	size_t    utf16_length   = 0;
+-	uint8_t   user_hash[32]  = {0,};
++	void*     utf16_password    = NULL;
++	size_t    utf8_length       = 0;
++	size_t    utf16_length      = 0;
++	size_t    utf16_real_length = 0;
++	uint8_t   user_hash[32]     = {0,};
+ 
+ 	/*
+ 	 * We first get the SHA256(SHA256(to_UTF16(user_password)))
+ 	 */
+-	utf16_length   = (strlen((char*) user_password)+1) * sizeof(uint16_t);
+-	utf16_password = dis_malloc(utf16_length);
++	utf8_length    = strlen((char*) user_password);
++	dis_printf(L_DEBUG, "Length of string password: %d\n", utf8_length);
++	/* Expected length of UTF-16 string */
++	utf16_length   = (utf8_length+1) * 2;
++	dis_printf(L_DEBUG, "Expected length of UTF-16 string password: %d\n", utf16_length);
+ 
+-	if(!asciitoutf16(user_password, utf16_password))
++	utf16_password = (uint8_t*)dis_malloc(utf16_length);
++	memset(utf16_password, 0, utf16_length);
++
++	if(!toutf16(user_password, (uint8_t*)utf16_password))
+ 	{
+ 		dis_printf(
+ 			L_ERROR,
+-			"Can't convert user password to UTF-16, aborting.\n"
++			"Can't convert user password to UTF-16, now trying with the original way...\n"
+ 		);
+-		memclean(utf16_password, utf16_length);
+-		return FALSE;
++
++		memset(utf16_password, 0, utf16_length);
++
++		if(!asciitoutf16(user_password, (uint16_t*)utf16_password))
++		{
++			dis_printf(
++				L_ERROR,
++				"Can't convert user password to UTF-16, aborting.\n"
++			);
++			memclean(utf16_password, utf16_length);
++			return FALSE;
++		}
+ 	}
+ 
++	/* Final real length of the UTF-16 string (without the '\0\0' ending) */
++	utf16_real_length = strlen_utf16(utf16_password, utf16_length);
++	dis_printf(L_DEBUG, "Real length of UTF-16 string password: %d\n", utf16_real_length);
++
+ 	dis_printf(L_DEBUG, "UTF-16 user password:\n");
+-	hexdump(L_DEBUG, (uint8_t*) utf16_password, utf16_length);
++	hexdump(L_DEBUG, (uint8_t*) utf16_password, utf16_real_length);
+ 
+ 	/* We're not taking the '\0\0' end of the UTF-16 string */
+-	SHA256((unsigned char *) utf16_password, utf16_length-2, user_hash);
+-	SHA256((unsigned char *) user_hash,      32,             user_hash);
++	SHA256((unsigned char *) utf16_password, utf16_real_length, user_hash);
++	SHA256((unsigned char *) user_hash,      32,                user_hash);
+ 
+ 	/*
+ 	 * We then pass it to the key stretching manipulation
+diff --git a/src/common.c b/src/common.c
+index 49ad6bd..0edd417 100644
+--- a/src/common.c
++++ b/src/common.c
+@@ -306,7 +306,7 @@ void xor_buffer(unsigned char* buf1, const unsigned char* buf2, unsigned char* o
+ /**
+  * Clean memory before freeing
+  *
+- * @param ptr A pointeur to the memory region
++ * @param ptr A pointer to the memory region
+  * @param size The size of the region
+  */
+ void memclean(void* ptr, size_t size)
+@@ -341,3 +341,28 @@ VALUE rb_hexdump(uint8_t* data, size_t data_len)
+ 
+ #endif /* _HAVE_RUBY */
+ 
++
++/**
++ * Counts the numbers of bytes that represent a string in a UTF-16 null-terminated string
++ *
++ * @param data A pointer to the string
++ * @return The number of bytes in the string
++ */
++size_t strlen_utf16(char *data, size_t max_length)
++{
++	size_t i = 0;
++	/* There should be at least 2 bytes (one character) */
++	if (!data || max_length < 2)
++		return 0;
++
++	while (i < (max_length - 1))
++	{
++		/* Taking 2 bytes at a time (one character)
++		 * If both values in current (even) index i and next (odd) index i are 0
++		 * then it is the end of the string
++		 */
++		if (data[i] == 0 && data[i+1] == 0) break;
++		i+=2;
++	}
++	return i;
++}
+diff --git a/src/config.c b/src/config.c
+index 2f1bdbc..9577799 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -56,13 +56,13 @@ static void hide_opt(char* opt)
+ static void setclearkey(dis_context_t dis_ctx, char* optarg)
+ {
+ 	(void) optarg;
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_USE_CLEAR_KEY, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_USE_CLEAR_KEY, &trueval);
+ }
+ static void setbekfile(dis_context_t dis_ctx, char* optarg)
+ {
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_USE_BEK_FILE, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_USE_BEK_FILE, &trueval);
+ 	dis_setopt(dis_ctx, DIS_OPT_SET_BEK_FILE_PATH, optarg);
+ }
+ static void setforceblock(dis_context_t dis_ctx, char* optarg)
+@@ -76,14 +76,14 @@ static void setforceblock(dis_context_t dis_ctx, char* optarg)
+ }
+ static void setfvek(dis_context_t dis_ctx, char* optarg)
+ {
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_USE_FVEK_FILE, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_USE_FVEK_FILE, &trueval);
+ 	dis_setopt(dis_ctx, DIS_OPT_SET_FVEK_FILE_PATH, optarg);
+ }
+ static void setvmk(dis_context_t dis_ctx, char* optarg)
+ {
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_USE_VMK_FILE, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_USE_VMK_FILE, &trueval);
+ 	dis_setopt(dis_ctx, DIS_OPT_SET_VMK_FILE_PATH, optarg);
+ }
+ static void setlogfile(dis_context_t dis_ctx, char* optarg)
+@@ -97,8 +97,8 @@ static void setoffset(dis_context_t dis_ctx, char* optarg)
+ }
+ static void setrecoverypwd(dis_context_t dis_ctx, char* optarg)
+ {
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_USE_RECOVERY_PASSWORD, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_USE_RECOVERY_PASSWORD, &trueval);
+ 	dis_setopt(dis_ctx, DIS_OPT_SET_RECOVERY_PASSWORD, optarg);
+ 	hide_opt(optarg);
+ }
+@@ -111,19 +111,19 @@ static void setquiet(dis_context_t dis_ctx, char* optarg)
+ static void setro(dis_context_t dis_ctx, char* optarg)
+ {
+ 	(void) optarg;
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_READ_ONLY, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_READ_ONLY, &trueval);
+ }
+ static void setstateok(dis_context_t dis_ctx, char* optarg)
+ {
+ 	(void) optarg;
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_DONT_CHECK_VOLUME_STATE, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_DONT_CHECK_VOLUME_STATE, &trueval);
+ }
+ static void setuserpassword(dis_context_t dis_ctx, char* optarg)
+ {
+-	int true = TRUE;
+-	dis_setopt(dis_ctx, DIS_OPT_USE_USER_PASSWORD, &true);
++	int trueval = TRUE;
++	dis_setopt(dis_ctx, DIS_OPT_USE_USER_PASSWORD, &trueval);
+ 	dis_setopt(dis_ctx, DIS_OPT_SET_USER_PASSWORD, optarg);
+ 	hide_opt(optarg);
+ }
+@@ -189,7 +189,7 @@ PROGNAME " by " AUTHOR ", v" VERSION " (compiled for " __OS "/" __ARCH ")\n"
+ "    -p, --recovery-password=[RECOVERY_PASSWORD]\n"
+ "                          decrypt volume using the recovery password method\n"
+ "    -q, --quiet           do NOT display anything\n"
+-"    -r, --readonly        do not allow to write on the BitLocker volume\n"
++"    -r, --readonly        do not allow one to write on the BitLocker volume\n"
+ "    -s, --stateok         do not check the volume's state, assume it's ok to mount it\n"
+ "    -u, --user-password=[USER_PASSWORD]\n"
+ "                          decrypt volume using the user password method\n"
+@@ -266,7 +266,7 @@ int dis_getopts(dis_context_t dis_ctx, int argc, char** argv)
+ 		return -1;
+ 
+ 	dis_config_t* cfg = &dis_ctx->cfg;
+-	int true = TRUE;
++	int trueval = TRUE;
+ 
+ 
+ 	long_opts = malloc(nb_options * sizeof(struct option));
+@@ -285,12 +285,12 @@ int dis_getopts(dis_context_t dis_ctx, int argc, char** argv)
+ 		{
+ 			case 'c':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_USE_CLEAR_KEY, &true);
++				dis_setopt(dis_ctx, DIS_OPT_USE_CLEAR_KEY, &trueval);
+ 				break;
+ 			}
+ 			case 'f':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_USE_BEK_FILE, &true);
++				dis_setopt(dis_ctx, DIS_OPT_USE_BEK_FILE, &trueval);
+ 				dis_setopt(dis_ctx, DIS_OPT_SET_BEK_FILE_PATH, optarg);
+ 				break;
+ 			}
+@@ -312,13 +312,13 @@ int dis_getopts(dis_context_t dis_ctx, int argc, char** argv)
+ 			}
+ 			case 'k':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_USE_FVEK_FILE, &true);
++				dis_setopt(dis_ctx, DIS_OPT_USE_FVEK_FILE, &trueval);
+ 				dis_setopt(dis_ctx, DIS_OPT_SET_FVEK_FILE_PATH, optarg);
+ 				break;
+ 			}
+ 			case 'K':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_USE_VMK_FILE, &true);
++				dis_setopt(dis_ctx, DIS_OPT_USE_VMK_FILE, &trueval);
+ 				dis_setopt(dis_ctx, DIS_OPT_SET_VMK_FILE_PATH, optarg);
+ 				break;
+ 			}
+@@ -340,7 +340,7 @@ int dis_getopts(dis_context_t dis_ctx, int argc, char** argv)
+ 			}
+ 			case 'p':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_USE_RECOVERY_PASSWORD, &true);
++				dis_setopt(dis_ctx, DIS_OPT_USE_RECOVERY_PASSWORD, &trueval);
+ 				dis_setopt(dis_ctx, DIS_OPT_SET_RECOVERY_PASSWORD, optarg);
+ 				hide_opt(optarg);
+ 				break;
+@@ -353,17 +353,17 @@ int dis_getopts(dis_context_t dis_ctx, int argc, char** argv)
+ 			}
+ 			case 'r':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_READ_ONLY, &true);
++				dis_setopt(dis_ctx, DIS_OPT_READ_ONLY, &trueval);
+ 				break;
+ 			}
+ 			case 's':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_DONT_CHECK_VOLUME_STATE, &true);
++				dis_setopt(dis_ctx, DIS_OPT_DONT_CHECK_VOLUME_STATE, &trueval);
+ 				break;
+ 			}
+ 			case 'u':
+ 			{
+-				dis_setopt(dis_ctx, DIS_OPT_USE_USER_PASSWORD, &true);
++				dis_setopt(dis_ctx, DIS_OPT_USE_USER_PASSWORD, &trueval);
+ 				dis_setopt(dis_ctx, DIS_OPT_SET_USER_PASSWORD, optarg);
+ 				hide_opt(optarg);
+ 				break;
+@@ -828,4 +828,3 @@ int dis_is_volume_state_checked(dis_context_t dis_ctx)
+ 		return -1;
+ 	return !(dis_ctx->cfg.flags & DIS_FLAG_DONT_CHECK_VOLUME_STATE);
+ }
+-
+diff --git a/src/dislocker-bek.c b/src/dislocker-bek.c
+index ba85239..154bf35 100644
+--- a/src/dislocker-bek.c
++++ b/src/dislocker-bek.c
+@@ -132,4 +132,3 @@ int main (int argc, char **argv)
+ 
+ 	return EXIT_SUCCESS;
+ }
+-
+diff --git a/src/dislocker-find.rb.in b/src/dislocker-find.rb.in
+index 73bd4d8..c2b6a59 100644
+--- a/src/dislocker-find.rb.in
++++ b/src/dislocker-find.rb.in
+@@ -32,7 +32,7 @@ def get_partitions
+ 	uname = nil
+ 	reps = %w(/bin/ /usr/bin/ /sbin/ /usr/sbin/)
+ 	reps.each do |rep|
+-		uname = "#{rep}uname" if File.exists?("#{rep}uname")
++		uname = "#{rep}uname" if File.exist?("#{rep}uname")
+ 	end
+ 
+ 	if uname.nil?
+@@ -138,7 +138,7 @@ end
+ 
+ encrypted_devices = []
+ devices.each do |dev|
+-	next unless File.exists? dev
++	next unless File.exist? dev
+ 	encrypted_devices << dev if is_bitlocker_encrypted? dev
+ end
+ 
+diff --git a/src/dislocker-fuse.c b/src/dislocker-fuse.c
+index f93523f..c5d81a8 100644
+--- a/src/dislocker-fuse.c
++++ b/src/dislocker-fuse.c
+@@ -32,12 +32,7 @@
+ #include "dislocker/dislocker.h"
+ 
+ 
+-
+-#ifdef __DARWIN
+-# include <osxfuse/fuse.h>
+-#else
+ # include <fuse.h>
+-#endif /* __DARWIN */
+ 
+ 
+ /** NTFS virtual partition's name */
+@@ -59,8 +54,10 @@ dis_context_t dis_ctx;
+ /**
+  * Stubs used for FUSE operations.
+  */
+-static int fs_getattr(const char *path, struct stat *stbuf)
++static int fs_getattr(const char *path, struct stat *stbuf,
++                      struct fuse_file_info *fi)
+ {
++	(void) fi;
+ 	int res = 0;
+ 
+ 	if(!path || !stbuf)
+@@ -86,11 +83,13 @@ static int fs_getattr(const char *path, struct stat *stbuf)
+ }
+ 
+ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+-                      off_t offset, struct fuse_file_info *fi)
++                      off_t offset, struct fuse_file_info *fi,
++                      enum fuse_readdir_flags flags)
+ {
+ 	/* Both variables aren't used here */
+ 	(void) offset;
+ 	(void) fi;
++	(void) flags;
+ 
+ 	if(!path || !buf || !filler)
+ 		return -EINVAL;
+@@ -98,9 +97,9 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+ 	if(strcmp(path, "/") != 0)
+ 		return -ENOENT;
+ 
+-	filler(buf, ".", NULL, 0);
+-	filler(buf, "..", NULL, 0);
+-	filler(buf, NTFS_FILENAME, NULL, 0);
++	filler(buf, ".", NULL, 0, 0);
++	filler(buf, "..", NULL, 0, 0);
++	filler(buf, NTFS_FILENAME, NULL, 0, 0);
+ 
+ 	return 0;
+ }
+@@ -204,6 +203,8 @@ int main(int argc, char** argv)
+ 	/* Get command line options */
+ 	dis_ctx = dis_new();
+ 	param_idx = dis_getopts(dis_ctx, argc, argv);
++	if (param_idx == -1)
++		exit(EXIT_FAILURE);
+ 
+ 	/*
+ 	 * Check we have a volume path given and if not, take the first non-argument
+diff --git a/src/dislocker-metadata.c b/src/dislocker-metadata.c
+index 0ff939e..38c50e3 100644
+--- a/src/dislocker-metadata.c
++++ b/src/dislocker-metadata.c
+@@ -131,6 +131,7 @@ int main(int argc, char **argv)
+ 	dis_meta_cfg = dis_metadata_config_new();
+ 	dis_meta_cfg->fve_fd       = fve_fd;
+ 	dis_meta_cfg->offset       = offset;
++	dis_meta_cfg->readonly     = 1;
+ 
+ 	dis_metadata = dis_metadata_new(dis_meta_cfg);
+ 	if(dis_metadata_initialize(dis_metadata) != DIS_RET_SUCCESS)
+diff --git a/src/dislocker.c b/src/dislocker.c
+index fb4a26c..41e216f 100644
+--- a/src/dislocker.c
++++ b/src/dislocker.c
+@@ -66,7 +66,7 @@
+ 
+ 
+ 
+-/* Get low-level errors the library encoutered by looking at this variable */
++/* Get low-level errors the library encountered by looking at this variable */
+ int dis_errno;
+ 
+ 
+@@ -183,6 +183,8 @@ int dis_initialize(dis_context_t dis_ctx)
+ 		return DIS_RET_ERROR_ALLOC;
+ 	}
+ 
++	dis_ctx->metadata->cfg->readonly = (dis_ctx->cfg.flags & DIS_FLAG_READ_ONLY) ? 1 : 0;
++
+ 	ret = dis_metadata_initialize(dis_ctx->metadata);
+ 	dis_ctx->curr_state = dis_meta_cfg->curr_state;
+ 	if(ret != DIS_RET_SUCCESS)
+@@ -326,7 +328,7 @@ int dislock(dis_context_t dis_ctx, uint8_t* buffer, off_t offset, size_t size)
+ 		return -EFAULT;
+ 	}
+ 
+-	if(offset >= (off_t)dis_ctx->io_data.volume_size)
++	if((offset >= (off_t)dis_ctx->io_data.volume_size) && !dis_metadata_is_decrypted_state(dis_ctx->io_data.metadata))
+ 	{
+ 		dis_printf(
+ 			L_ERROR,
+diff --git a/src/dislocker.rb b/src/dislocker.rb
+index ab1b397..060d64e 100644
+--- a/src/dislocker.rb
++++ b/src/dislocker.rb
+@@ -12,7 +12,7 @@ class Dislocker < Formula
+ 
+     depends_on 'mbedtls'
+     depends_on 'cmake'
+-#    This dependency is seperately installed, as a cask
++#    This dependency is separately installed, as a cask
+ #    depends_on :osxfuse
+ 
+     def install
+diff --git a/src/encryption/aes-xts.c b/src/encryption/aes-xts.c
+index 2172e39..be09c46 100644
+--- a/src/encryption/aes-xts.c
++++ b/src/encryption/aes-xts.c
+@@ -303,4 +303,3 @@ first:
+ 
+ 	return( 0 );
+ }
+-
+diff --git a/src/encryption/diffuser.c b/src/encryption/diffuser.c
+index 1b55328..b077863 100644
+--- a/src/encryption/diffuser.c
++++ b/src/encryption/diffuser.c
+@@ -177,5 +177,3 @@ void diffuserB_encrypt(uint8_t* sector, uint16_t sector_size, uint32_t* buffer)
+ 		Bcycles--;
+ 	}
+ }
+-
+-
+diff --git a/src/encryption/encrypt.c b/src/encryption/encrypt.c
+index 325c4d1..3f96ae2 100644
+--- a/src/encryption/encrypt.c
++++ b/src/encryption/encrypt.c
+@@ -57,7 +57,7 @@ int encrypt_sector(dis_crypt_t crypt, uint8_t* sector, off_t sector_address, uin
+ 
+ 
+ /**
+- * Encrypt a sector whithout the diffuser
++ * Encrypt a sector without the diffuser
+  *
+  * @param ctx AES's contexts
+  * @param sector_size Size of a sector (in bytes)
+@@ -173,6 +173,3 @@ void encrypt_xts(
+ 		buffer
+ 	);
+ }
+-
+-
+-
+diff --git a/src/inouts/inouts.c b/src/inouts/inouts.c
+index de44e7e..0bdd9fe 100644
+--- a/src/inouts/inouts.c
++++ b/src/inouts/inouts.c
+@@ -105,4 +105,3 @@ uint16_t dis_inouts_sector_size(dis_context_t dis_ctx)
+ 
+ 	return dis_ctx->io_data.sector_size;
+ }
+-
+diff --git a/src/inouts/prepare.c b/src/inouts/prepare.c
+index eb2b1e3..6d8a0be 100644
+--- a/src/inouts/prepare.c
++++ b/src/inouts/prepare.c
+@@ -109,6 +109,10 @@ int prepare_crypt(dis_context_t dis_ctx)
+ 	io_data->decrypt_region = read_decrypt_sectors;
+ 	io_data->encrypt_region = encrypt_write_sectors;
+ 	io_data->encrypted_volume_size = dis_metadata_encrypted_volume_size(io_data->metadata);
++	if (io_data->metadata->information->version == V_VISTA) {
++		io_data->encrypted_volume_size = dis_metadata_volume_size_from_vbr(dis_ctx->metadata);
++		io_data->encrypted_volume_size += io_data->sector_size;		//The volume size of Vista should include the DBR backup
++	}
+ 	io_data->backup_sectors_addr   = dis_metadata_ntfs_sectors_address(io_data->metadata);
+ 	io_data->nb_backup_sectors     = dis_metadata_backup_sectors_count(io_data->metadata);
+ 
+@@ -116,7 +120,7 @@ int prepare_crypt(dis_context_t dis_ctx)
+ 	 * Get volume size directly from dis_metadata_t, which is more accurate.
+ 	 */
+ 	io_data->volume_size = io_data->encrypted_volume_size;
+-	if(io_data->volume_size == 0)
++	if(io_data->volume_size == 0 && !dis_metadata_is_decrypted_state(io_data->metadata))
+ 	{
+ 		dis_printf(L_ERROR, "Can't initialize the volume's size\n");
+ 		return DIS_RET_ERROR_VOLUME_SIZE_NOT_FOUND;
+@@ -136,4 +140,3 @@ int prepare_crypt(dis_context_t dis_ctx)
+ 
+ 	return DIS_RET_SUCCESS;
+ }
+-
+diff --git a/src/inouts/sectors.c b/src/inouts/sectors.c
+index 2e700f0..86b7fbd 100644
+--- a/src/inouts/sectors.c
++++ b/src/inouts/sectors.c
+@@ -112,7 +112,7 @@ int read_decrypt_sectors(
+ 
+ 	size_t   nb_loop = 0;
+ 	size_t   size    = nb_read_sector * sector_size;
+-	uint8_t* input   = malloc(size);
++	uint8_t* input   = dis_malloc(size);
+ 	off_t    off     = sector_start + io_data->part_off;
+ 
+ 	memset(input , 0, size);
+@@ -123,7 +123,7 @@ int read_decrypt_sectors(
+ 
+ 	if(read_size <= 0)
+ 	{
+-		free(input);
++		dis_free(input);
+ 		dis_printf(
+ 			L_ERROR,
+ 			"Unable to read %#" F_SIZE_T " bytes from %#" F_OFF_T "\n",
+@@ -191,7 +191,7 @@ int read_decrypt_sectors(
+ #endif
+ 
+ 
+-	free(input);
++	dis_free(input);
+ 
+ 	return TRUE;
+ }
+@@ -220,7 +220,7 @@ int encrypt_write_sectors(
+ 	if(!io_data || !input)
+ 		return FALSE;
+ 
+-	uint8_t* output = malloc(nb_write_sector * sector_size);
++	uint8_t* output = dis_malloc(nb_write_sector * sector_size);
+ 
+ 	memset(output , 0, nb_write_sector * sector_size);
+ 
+@@ -281,7 +281,7 @@ int encrypt_write_sectors(
+ 		sector_start + io_data->part_off
+ 	);
+ 
+-	free(output);
++	dis_free(output);
+ 	if(write_size <= 0)
+ 		return FALSE;
+ 
+@@ -309,6 +309,7 @@ static void* thread_decrypt(void* params)
+ 	uint16_t version      = dis_metadata_information_version(io_data->metadata);
+ 	uint16_t sector_size  = args->sector_size;
+ 	uint16_t step_size    = (uint16_t) (sector_size * step_unit);
++	uint64_t encrypted_volume_total_sectors = io_data->encrypted_volume_size / sector_size;
+ 
+ 	off_t    offset       = args->sector_start + sector_size * loop;
+ 	uint8_t* loop_input   = args->input + sector_size * loop;
+@@ -375,12 +376,12 @@ static void* thread_decrypt(void* params)
+ 			);
+ 			memcpy(loop_output, loop_input, sector_size);
+ 		}
+-		else if(version == V_VISTA && sector_offset < 16)
++		else if(version == V_VISTA && (sector_offset < 16 || sector_offset + 1 == (off_t) encrypted_volume_total_sectors))
+ 		{
+ 			/*
+ 			 * The firsts sectors are not really encrypted on a Vista volume
+ 			 */
+-			if(sector_offset < 1)
++			if(sector_offset < 1 || sector_offset + 1 == (off_t) encrypted_volume_total_sectors)
+ 				fix_read_sector_vista(
+ 					io_data,
+ 					loop_input,
+@@ -433,6 +434,7 @@ static void* thread_encrypt(void* params)
+ 	uint16_t version     = dis_metadata_information_version(io_data->metadata);
+ 	uint16_t sector_size = args->sector_size;
+ 	uint16_t step_size   = (uint16_t) (sector_size * step_unit);
++	uint64_t encrypted_volume_total_sectors = io_data->encrypted_volume_size / sector_size;
+ 
+ 	uint8_t* loop_input  = args->input + sector_size * loop;
+ 	uint8_t* loop_output = args->output + sector_size * loop;
+@@ -448,7 +450,7 @@ static void* thread_encrypt(void* params)
+ 		/*
+ 		 * Just encrypt this sector
+ 		 * Exception: don't encrypt it if the sector wasn't (as in the
+-		 * "BitLocker's-volume-encryption-was-paused case decribed in the
++		 * "BitLocker's-volume-encryption-was-paused case described in the
+ 		 * decryption function above")
+ 		 */
+ 
+@@ -458,12 +460,12 @@ static void* thread_encrypt(void* params)
+ 		 * NOTE: Seven specificities are dealt with earlier in the process
+ 		 * see dislocker.c:enlock()
+ 		 */
+-		if(version == V_VISTA && sector_offset < 16)
++		if(version == V_VISTA && (sector_offset < 16 || sector_offset + 1 == (off_t) encrypted_volume_total_sectors))
+ 		{
+ 			/*
+ 			 * The firsts sectors are not really encrypted on a Vista volume
+ 			 */
+-			if(sector_offset < 1)
++			if(sector_offset < 1 || sector_offset + 1 == (off_t) encrypted_volume_total_sectors)
+ 				fix_write_sector_vista(
+ 					io_data,
+ 					loop_input,
+@@ -612,4 +614,3 @@ static void fix_write_sector_vista(dis_iodata_t* io_data,
+ 
+ 	dis_metadata_vista_vbr_ntfs2fve(io_data->metadata, output);
+ }
+-
+diff --git a/src/logs/event_descriptors.c b/src/logs/event_descriptors.c
+index 6357245..ccf5e2a 100644
+--- a/src/logs/event_descriptors.c
++++ b/src/logs/event_descriptors.c
+@@ -504,4 +504,3 @@ void init_events()
+ 		.keyword = 0x8000000000000000
+ 	};
+ }
+-
+diff --git a/src/mbed_install.sh b/src/mbed_install.sh
+index be7989d..491902c 100755
+--- a/src/mbed_install.sh
++++ b/src/mbed_install.sh
+@@ -2,17 +2,17 @@
+ 
+ MBEDTLS_FOLDER=mbedtls-for-dislocker
+ 
+-if brew info mbedtls |head -1 |grep -q 2.0.0
++if brew info mbedtls | head -1 | grep -q 2.0.0
+ then
+-	git clone https://github.com/ARMmbed/mbedtls.git ${MBEDTLS_FOLDER}
+-	cd ${MBEDTLS_FOLDER}
++	git clone https://github.com/ARMmbed/mbedtls.git "${MBEDTLS_FOLDER}"
++	cd "${MBEDTLS_FOLDER}"
+ 	git checkout mbedtls-2.0.0
+ 	git cherry-pick -n --strategy=recursive -Xours 6f42417ba8dd28fa77fd08d42d73c87a0253f93e
+ 	cmake .
+ 	make VERBOSE=1
+ 	make install
+ 	cd ..
+-	rm -fr ${MBEDTLS_FOLDER}
++	rm -fr "${MBEDTLS_FOLDER}"
+ else
+ 	brew install -v polarssl
+ fi
+diff --git a/src/metadata/datums.c b/src/metadata/datums.c
+index 5cc6480..4137ac9 100644
+--- a/src/metadata/datums.c
++++ b/src/metadata/datums.c
+@@ -163,7 +163,7 @@ char* cipherstr(cipher_t enc)
+  * string format
+  * @warning This returned string has to be free()d
+  *
+- * @param value_type The datum's value type to tranform
++ * @param value_type The datum's value type to transform
+  * @return The decoded string or NULL if there's no signification (index out of
+  * bound)
+  */
+@@ -202,8 +202,7 @@ int get_header_safe(void* data, datum_header_safe_t* header)
+ 			header->entry_type, header->value_type, header->error_status);
+ 
+ 	/* Now check if the header is good */
+-	if(header->datum_size < sizeof(datum_header_safe_t) ||
+-	   header->value_type > NB_DATUMS_VALUE_TYPES)
++	if(header->datum_size < sizeof(datum_header_safe_t))
+ 		return FALSE;
+ 
+ 	return TRUE;
+@@ -230,6 +229,9 @@ int get_payload_safe(void* data, void** payload, size_t* size_payload)
+ 	if(!get_header_safe(data, &header))
+ 		return FALSE;
+ 
++	if(header.value_type >= NB_DATUMS_VALUE_TYPES)
++		return FALSE;
++
+ 	size_header = datum_value_types_prop[header.value_type].size_header;
+ 
+ 	if(header.datum_size <= size_header)
+@@ -327,7 +329,7 @@ void print_datum_key(DIS_LOGS level, void* vdatum)
+ 	datum_key_t* datum = (datum_key_t*) vdatum;
+ 	char* cipher_str = cipherstr((cipher_t) datum->algo);
+ 
+-	dis_printf(level, "Unkown: \n");
++	dis_printf(level, "Unknown: \n");
+ 	hexdump(level, (void*) &datum->padd, 2);
+ 	dis_printf(level, "Algo: %s (%#hx)\n", cipher_str, datum->algo);
+ 	dis_printf(level, "Key:\n");
+@@ -368,7 +370,7 @@ void print_datum_stretch_key(DIS_LOGS level, void* vdatum)
+ {
+ 	datum_stretch_key_t* datum = (datum_stretch_key_t*) vdatum;
+ 
+-	dis_printf(level, "Unkown: \n");
++	dis_printf(level, "Unknown: \n");
+ 	hexdump(level, (void*) &datum->padd, 2);
+ 	dis_printf(level, "Algo: %#x\n", datum->algo);
+ 	dis_printf(level, "Salt: \n");
+@@ -423,6 +425,29 @@ void print_datum_tpmenc(DIS_LOGS level, void* vdatum)
+ 	);
+ }
+ 
++int is_recvoery_key(datum_vmk_t* datum)
++{
++	int bRecvoeryKey = FALSE;
++
++	if (datum) {
++		char *pStart = ((char *)datum) + sizeof(datum_vmk_t);
++		char *pEnd = ((char *)datum) + datum->header.datum_size;
++		while (pStart < pEnd) {
++			uint32_t u32Size = *((uint32_t*)pStart);
++			if (u32Size == 0) {
++				break;
++			}
++			if (*((uint16_t *)(pStart + 4)) == 0x15) {
++				bRecvoeryKey = TRUE;
++				break;
++			}
++			pStart += u32Size;
++		}
++	}
++
++	return bRecvoeryKey;
++}
++
+ void print_datum_vmk(DIS_LOGS level, void* vdatum)
+ {
+ 	datum_vmk_t* datum = (datum_vmk_t*) vdatum;
+@@ -431,7 +456,14 @@ void print_datum_vmk(DIS_LOGS level, void* vdatum)
+ 
+ 	format_guid(datum->guid, extkey_id);
+ 
+-	dis_printf(level, "Recovery Key GUID: '%.39s'\n", extkey_id);
++	if (is_recvoery_key(datum))
++	{
++		dis_printf(level, "[* Recovery Key GUID *]: '%.39s'\n", extkey_id);
++	}
++	else
++	{
++		dis_printf(level, "Recovery Key GUID: '%.39s'\n", extkey_id);
++	}
+ 	dis_printf(level, "Nonce: \n");
+ 	print_nonce(level, datum->nonce);
+ 
+@@ -580,7 +612,7 @@ int get_next_datum(
+ 	void** datum_result)
+ {
+ 	// Check parameters
+-	if(!dis_meta || value_type > NB_DATUMS_VALUE_TYPES)
++	if(!dis_meta)
+ 		return FALSE;
+ 
+ 	dis_printf(L_DEBUG, "Entering get_next_datum...\n");
+@@ -660,6 +692,9 @@ int get_nested_datum(void* datum, void** datum_nested)
+ 	if(!get_header_safe(datum, &header))
+ 		return FALSE;
+ 
++	if(header.value_type >= NB_DATUMS_VALUE_TYPES)
++		return FALSE;
++
+ 	if(!datum_value_types_prop[header.value_type].has_nested_datum)
+ 		return FALSE;
+ 
+@@ -757,7 +792,7 @@ int dis_metadata_has_clear_key(dis_metadata_t dis_meta, void** vmk_datum)
+ 
+ 	dis_printf(L_DEBUG, "Entering has_clear_key. Returning result of get_vmk_datum_from_range with range between 0x00 and 0xff\n");
+ 
+-	return get_vmk_datum_from_range(dis_meta, 0x00, 0xff, vmk_datum);
++	return get_vmk_datum_from_range(dis_meta, 0x00, 0xff, vmk_datum, NULL);
+ }
+ 
+ 
+diff --git a/src/metadata/fvek.c b/src/metadata/fvek.c
+index 194d172..fc1b1c5 100644
+--- a/src/metadata/fvek.c
++++ b/src/metadata/fvek.c
+@@ -104,6 +104,7 @@ int get_fvek(dis_metadata_t dis_meta, void* vmk_datum, void** fvek_datum)
+ 			"VMK size too big, unsupported: %#" F_SIZE_T "\n",
+ 			vmk_key_size
+ 		);
++		dis_free(vmk_key);
+ 		return FALSE;
+ 	}
+ 
+@@ -126,6 +127,7 @@ int get_fvek(dis_metadata_t dis_meta, void* vmk_datum, void** fvek_datum)
+ 
+ 		dis_printf(L_CRITICAL, "Can't decrypt correctly the FVEK. Abort.\n");
+ 		dis_free(*fvek_datum);
++		dis_free(vmk_key);
+ 		return FALSE;
+ 	}
+ 
+@@ -168,10 +170,10 @@ int build_fvek_from_file(dis_config_t* cfg, void** fvek_datum)
+ 	} enc_method;
+ 
+ 	memset(enc_method.multi, 0, 2);
+-	char fvek_keys[64] = {0,};
+-
+-	off_t expected_size = sizeof(enc_method) + sizeof(fvek_keys);
+-
++	char fvek_key_buffer[64] = {0,};
++	off_t expected_file_size_64bit_key = sizeof(enc_method) + 32;
++	off_t expected_file_size_128bit_key = sizeof(enc_method) + 64;
++	off_t used_key_size = 0;
+ 
+ 	file_fd = dis_open(cfg->fvek_file, O_RDONLY);
+ 	if(file_fd == -1)
+@@ -183,17 +185,20 @@ int build_fvek_from_file(dis_config_t* cfg, void** fvek_datum)
+ 	/* Check the file's size */
+ 	actual_size = dis_lseek(file_fd, 0, SEEK_END);
+ 
+-	if(actual_size != expected_size)
++	if(actual_size != expected_file_size_64bit_key && actual_size != expected_file_size_128bit_key)
+ 	{
+ 		dis_printf(
+ 			L_ERROR,
+-			"Wrong FVEK file size, expected %d but has %d\n",
+-			expected_size,
++			"Wrong FVEK file size, expected %d or %d but has %d\n",
++			expected_file_size_64bit_key,
++			expected_file_size_128bit_key,
+ 			actual_size
+ 		);
+ 		return FALSE;
+ 	}
+ 
++	used_key_size = actual_size - sizeof(enc_method);
++
+ 	/* Read everything */
+ 	dis_lseek(file_fd, 0, SEEK_SET);
+ 	rs = dis_read(file_fd, enc_method.multi, sizeof(enc_method));
+@@ -205,8 +210,8 @@ int build_fvek_from_file(dis_config_t* cfg, void** fvek_datum)
+ 		);
+ 		return FALSE;
+ 	}
+-	rs = dis_read(file_fd, fvek_keys,  sizeof(fvek_keys));
+-	if(rs != sizeof(fvek_keys))
++	rs = dis_read(file_fd, fvek_key_buffer, used_key_size);
++	if(rs != used_key_size)
+ 	{
+ 		dis_printf(L_ERROR, "Cannot read whole FVEK keys in the FVEK file\n");
+ 		return FALSE;
+@@ -214,11 +219,11 @@ int build_fvek_from_file(dis_config_t* cfg, void** fvek_datum)
+ 
+ 
+ 	/* Create the FVEK datum */
+-	*fvek_datum = dis_malloc(sizeof(datum_key_t) + sizeof(fvek_keys));
++	*fvek_datum = dis_malloc(sizeof(datum_key_t) + used_key_size);
+ 
+ 	/* ... create the header */
+ 	datum_key = *fvek_datum;
+-	datum_key->header.datum_size = sizeof(datum_key_t) + sizeof(fvek_keys);
++	datum_key->header.datum_size = sizeof(datum_key_t) + used_key_size;
+ 	datum_key->header.entry_type = 3;
+ 	datum_key->header.value_type = DATUMS_VALUE_KEY;
+ 	datum_key->header.error_status = 1;
+@@ -227,7 +232,7 @@ int build_fvek_from_file(dis_config_t* cfg, void** fvek_datum)
+ 	datum_key->padd = 0;
+ 
+ 	/* ... copy the keys */
+-	memcpy((char*) *fvek_datum + sizeof(datum_key_t), fvek_keys, sizeof(fvek_keys));
++	memcpy((char*) *fvek_datum + sizeof(datum_key_t), fvek_key_buffer, used_key_size);
+ 
+ 
+ 	return TRUE;
+diff --git a/src/metadata/metadata.c b/src/metadata/metadata.c
+index 412abeb..824d34b 100644
+--- a/src/metadata/metadata.c
++++ b/src/metadata/metadata.c
+@@ -27,6 +27,7 @@
+ #include "dislocker/metadata/metadata_config.h"
+ #include "dislocker/metadata/print_metadata.h"
+ #include "dislocker/dislocker.priv.h"
++#include "dislocker/metadata/datums.h"   /* for datum_header_safe_t, DATUMS_VALUE_VIRTUALIZATION_INFO */
+ 
+ #include <sys/ioctl.h>
+ 
+@@ -88,6 +89,66 @@ static int get_eow_check_valid(
+ 
+ 
+ 
++/*
++ * Fallback helper:
++ * On some volumes the VIRTUALIZATION INFO datum (value_type 0x000F) may reside
++ * near the end of the 64 KiB metadata file such that a dataset-bounded iterator
++ * misses it. This linear scan looks through the on-disk metadata copy for a
++ * datum header with value_type == DATUMS_VALUE_VIRTUALIZATION_INFO and, if
++ * found, returns a heap-copied datum blob in *out (caller owns it).
++ */
++static int
++find_virtualization_linear_from_metafile(dis_metadata_t dis_meta,
++                                         datum_virtualization_t **out)
++{
++	if(!dis_meta || !out) return FALSE;
++	*out = NULL;
++
++	/* metadata copy #0 was already located; sizes computed in end_compute_regions() */
++	dis_regions_t *regions = dis_meta->virt_region;
++	if(!regions || regions[0].addr == 0 || regions[0].size == 0)
++		return FALSE;
++
++	const off_t start = (off_t)regions[0].addr + dis_meta->cfg->offset;
++	const size_t len  = (size_t)regions[0].size; /* typically 0x10000 */
++
++	uint8_t *buf = (uint8_t*)dis_malloc(len);
++	if(!buf) return FALSE;
++
++	dis_lseek(dis_meta->cfg->fve_fd, start, SEEK_SET);
++	ssize_t n = dis_read(dis_meta->cfg->fve_fd, buf, len);
++	if(n < (ssize_t)sizeof(datum_header_safe_t)) { dis_free(buf); return FALSE; }
++
++	const size_t limit = (size_t)n;
++
++	for(size_t off = 0; off + sizeof(datum_header_safe_t) <= limit; off += 2)
++	{
++		datum_header_safe_t h;
++		memcpy(&h, buf + off, sizeof(h));
++		/* datum_size is u16 in LE and may be stored in a wider field; mask to 16 bits */
++		size_t dsize = ((size_t)h.datum_size) & 0xffff;
++
++		if(dsize < sizeof(datum_header_safe_t) || dsize > 0x1000)
++			continue;
++		if(h.value_type != DATUMS_VALUE_VIRTUALIZATION_INFO)
++			continue;
++		if(off + dsize > limit)
++			continue;
++
++		datum_virtualization_t *cand = (datum_virtualization_t*)dis_malloc(dsize);
++		if(!cand) { dis_free(buf); return FALSE; }
++
++		memcpy(cand, buf + off, dsize);
++		dis_free(buf);
++		*out = cand;
++		return TRUE;
++	}
++
++	dis_free(buf);
++	return FALSE;
++}
++
++
+ 
+ dis_metadata_config_t dis_metadata_config_new()
+ {
+@@ -216,7 +277,7 @@ int dis_metadata_initialize(dis_metadata_t dis_meta)
+ 	{
+ 		dis_printf(
+ 			L_CRITICAL,
+-			"A problem occured during the retrieving of metadata. Abort.\n"
++			"A problem occurred during the retrieving of metadata. Abort.\n"
+ 		);
+ 		return DIS_RET_ERROR_METADATA_CHECK;
+ 	}
+@@ -454,8 +515,10 @@ static int check_volume_header(dis_metadata_t dis_meta, int volume_fd, off_t dis
+ 			        " failed\n", source);
+ 		}
+ 
+-		dis_printf(L_ERROR, "EOW volume GUID not supported.\n");
+-		return FALSE;
++		if (!dis_meta->cfg->readonly) {
++			dis_printf(L_ERROR, "EOW volume GUID not supported for writing.\n");
++			return FALSE;
++        }
+ 	}
+ 	else
+ 	{
+@@ -619,17 +682,30 @@ static int end_compute_regions(dis_metadata_t dis_meta)
+ 		if(!get_next_datum(dis_meta, UINT16_MAX,
+ 		    DATUMS_VALUE_VIRTUALIZATION_INFO, NULL, (void**)&datum))
+ 		{
+-			char* type_str = datumvaluetypestr(DATUMS_VALUE_VIRTUALIZATION_INFO);
+-			dis_printf(
+-				L_ERROR,
+-				"Error looking for the VIRTUALIZATION datum type"
+-				" %hd (%s). Internal failure, abort.\n",
+-				DATUMS_VALUE_VIRTUALIZATION_INFO,
+-				type_str
+-			);
+-			dis_free(type_str);
+-			datum = NULL;
+-			return DIS_RET_ERROR_VIRTUALIZATION_INFO_DATUM_NOT_FOUND;
++			/* Fallback: linear scan of the on-disk 64 KiB metadata copy to
++			 * recover a VIRTUALIZATION INFO datum that lies past the dataset
++			 * copy_size boundary. This keeps the normal path untouched. */
++			datum_virtualization_t *lin = NULL;
++			if(find_virtualization_linear_from_metafile(dis_meta, &lin))
++			{
++				datum = lin;
++				dis_printf(L_DEBUG,
++				           "Recovered VIRTUALIZATION INFO datum via linear scan fallback.\n");
++			}
++			else
++			{
++				char* type_str = datumvaluetypestr(DATUMS_VALUE_VIRTUALIZATION_INFO);
++				dis_printf(
++					L_ERROR,
++					"Error looking for the VIRTUALIZATION datum type"
++					" %hd (%s). Internal failure, abort.\n",
++					DATUMS_VALUE_VIRTUALIZATION_INFO,
++					type_str
++				);
++				dis_free(type_str);
++				datum = NULL;
++				return DIS_RET_ERROR_VIRTUALIZATION_INFO_DATUM_NOT_FOUND;
++			}
+ 		}
+ 
+ 		dis_meta->nb_virt_region++;
+@@ -730,7 +806,7 @@ static int get_metadata(off_t source, void **metadata, int fd)
+ 
+ 	*metadata = dis_malloc(size);
+ 
+-	// Copy the header at the begining of the metadata
++	// Copy the header at the beginning of the metadata
+ 	memcpy(*metadata, &information, sizeof(bitlocker_information_t));
+ 
+ 	dis_printf(L_DEBUG, "Reading data...\n");
+@@ -829,11 +905,11 @@ static int get_eow_information(off_t source, void** eow_infos, int fd)
+ 		return FALSE;
+ 	}
+ 
+-	size_t rest_size = size - sizeof(bitlocker_information_t);
++	size_t rest_size = size - sizeof(bitlocker_eow_infos_t);
+ 
+ 	*eow_infos = dis_malloc(size);
+ 
+-	// Copy the header at the begining of the EOW information
++	// Copy the header at the beginning of the EOW information
+ 	memcpy(*eow_infos, &eow_infos_hdr, sizeof(bitlocker_eow_infos_t));
+ 
+ 	dis_printf(L_DEBUG, "Reading EOW information's payload...\n");
+@@ -1006,6 +1082,8 @@ static int get_eow_check_valid(
+ 	off_t         curr_offset = 0;
+ 	int           payload_size = 0;
+ 
++	unsigned char* crc_temp_buffer;
++
+ 	while(current < 2)
+ 	{
+ 		/* Compute the on-disk offset */
+@@ -1043,7 +1121,12 @@ static int get_eow_check_valid(
+ 
+ 		/* Check the crc32 validity */
+ 		eow_infos_size = eow_infos_hdr->infos_size;
+-		computed_crc32 = crc32((unsigned char*)*eow_infos, eow_infos_size);
++
++		crc_temp_buffer = (unsigned char*)dis_malloc(eow_infos_size);
++		memcpy(crc_temp_buffer, *eow_infos, eow_infos_size);
++		((bitlocker_eow_infos_t*)crc_temp_buffer)->crc32 = 0;
++		computed_crc32 = crc32(crc_temp_buffer, eow_infos_size);
++		dis_free(crc_temp_buffer);
+ 
+ 		dis_printf(L_DEBUG, "Looking if %#x == %#x for EOW information validation\n",
+ 		        computed_crc32, eow_infos_hdr->crc32);
+@@ -1150,7 +1233,7 @@ void dis_metadata_vista_vbr_fve2ntfs(dis_metadata_t dis_meta, void* vbr)
+ 	memcpy(volume_header->signature, NTFS_SIGNATURE, NTFS_SIGNATURE_SIZE);
+ 
+ 	/* And this is for the MFT Mirror field */
+-	volume_header->mft_mirror = dis_meta->volume_header->mft_mirror;
++	volume_header->mft_mirror = dis_metadata_mftmirror(dis_meta);
+ }
+ 
+ 
+@@ -1318,6 +1401,9 @@ uint32_t dis_metadata_backup_sectors_count(dis_metadata_t dis_meta)
+ 	return dis_meta->information->nb_backup_sectors;
+ }
+ 
++int dis_metadata_is_decrypted_state(dis_metadata_t dis_meta) {
++	return dis_meta->information->curr_state == METADATA_STATE_DECRYPTED;
++}
+ 
+ #ifdef _HAVE_RUBY
+ #include <sys/types.h>
+diff --git a/src/metadata/print_metadata.c b/src/metadata/print_metadata.c
+index f743a5e..eedd4d2 100644
+--- a/src/metadata/print_metadata.c
++++ b/src/metadata/print_metadata.c
+@@ -59,7 +59,7 @@ void print_volume_header(DIS_LOGS level, dis_metadata_t dis_meta)
+ 	format_guid(volume_header->guid, rec_id);
+ 
+ 
+-	dis_printf(level, "=====[ Volume header informations ]=====\n");
++	dis_printf(level, "=====[ Volume header information ]=====\n");
+ 	dis_printf(level, "  Signature: '%.8s'\n", volume_header->signature);
+ 	dis_printf(level, "  Sector size: 0x%1$04x (%1$hu) bytes\n", volume_header->sector_size);
+ 	dis_printf(level, "  Sector per cluster: 0x%1$02x (%1$hhu) bytes\n", volume_header->sectors_per_cluster);
+@@ -122,7 +122,7 @@ void print_information(DIS_LOGS level, dis_metadata_t dis_meta)
+ 	dis_printf(level, "  Current state: %s (%hu)\n", get_state_str(information->curr_state), information->curr_state);
+ 	dis_printf(level, "  Next state: %s (%hu)\n",    get_state_str(information->next_state), information->next_state);
+ 	dis_printf(level, "  Encrypted volume size: %1$" PRIu64 " bytes (%1$#" PRIx64 "), ~%2$" PRIu64 " MB\n", information->encrypted_volume_size, information->encrypted_volume_size / (1024*1024));
+-	dis_printf(level, "  Size of convertion region: %1$#x (%1$u)\n", information->convert_size);
++	dis_printf(level, "  Size of conversion region: %1$#x (%1$u)\n", information->convert_size);
+ 	dis_printf(level, "  Number of boot sectors backuped: %1$u sectors (%1$#x)\n", information->nb_backup_sectors);
+ 	dis_printf(level, "  First metadata header offset:  %#" PRIx64 "\n", information->information_off[0]);
+ 	dis_printf(level, "  Second metadata header offset: %#" PRIx64 "\n", information->information_off[1]);
+@@ -187,7 +187,7 @@ void print_eow_infos(DIS_LOGS level, dis_metadata_t dis_meta)
+ 
+ 	bitlocker_eow_infos_t* eow_infos = dis_meta->eow_information;
+ 
+-	dis_printf(level, "=======================[ BitLocker EOW informations ]========================\n");
++	dis_printf(level, "=======================[ BitLocker EOW information ]========================\n");
+ 	dis_printf(level, "  Signature: '%.8s'\n", eow_infos->signature);
+ 	dis_printf(level, "  Structure size: 0x%1$04x (%1$hu)\n", eow_infos->header_size);
+ 	dis_printf(level, "  On-disk size: 0x%1$04x (%1$hu)\n", eow_infos->infos_size);
+@@ -243,11 +243,10 @@ void print_data(DIS_LOGS level, dis_metadata_t dis_meta)
+ 			break;
+ 
+ 		dis_printf(level, "\n");
+-		dis_printf(level, "=======[ Datum n°%d informations ]=======\n", ++loop);
++		dis_printf(level, "=======[ Datum n°%d information ]=======\n", ++loop);
+ 		print_one_datum(level, data);
+ 		dis_printf(level, "=========================================\n");
+ 
+ 		data += header.datum_size;
+ 	}
+ }
+-
+diff --git a/src/metadata/vmk.c b/src/metadata/vmk.c
+index b2d0a42..cc8d13c 100644
+--- a/src/metadata/vmk.c
++++ b/src/metadata/vmk.c
+@@ -260,7 +260,7 @@ int get_vmk_datum_from_guid(dis_metadata_t dis_meta, guid_t guid,
+  * @return TRUE if result can be trusted, FALSE otherwise
+  */
+ int get_vmk_datum_from_range(dis_metadata_t dis_meta, uint16_t min_range,
+-	uint16_t max_range, void** vmk_datum)
++	uint16_t max_range, void** vmk_datum, void* prev_vmk_datum)
+ {
+ 	// Check parameters
+ 	if(!dis_meta)
+@@ -268,7 +268,11 @@ int get_vmk_datum_from_range(dis_metadata_t dis_meta, uint16_t min_range,
+ 
+ 	uint16_t datum_range = 0;
+ 
+-	*vmk_datum = NULL;
++	if (prev_vmk_datum) {
++		*vmk_datum = prev_vmk_datum;
++	} else {
++		*vmk_datum = NULL;
++	}
+ 
+ 	while(1)
+ 	{
+diff --git a/src/ntfs/clock.c b/src/ntfs/clock.c
+index 4a2095a..15b07ff 100644
+--- a/src/ntfs/clock.c
++++ b/src/ntfs/clock.c
+@@ -39,4 +39,3 @@ void ntfs2utc(ntfs_time_t t, time_t *ts)
+ 
+ 	*ts = (time_t) ((t - (uint64_t)(NTFS_TIME_OFFSET)) / (uint64_t)10000000 );
+ }
+-
+diff --git a/src/ntfs/encoding.c b/src/ntfs/encoding.c
+index 10b795b..39f282e 100644
+--- a/src/ntfs/encoding.c
++++ b/src/ntfs/encoding.c
+@@ -21,6 +21,8 @@
+  * USA.
+  */
+ 
++#include <iconv.h>
++#include <locale.h>
+ #include "dislocker/ntfs/encoding.h"
+ 
+ 
+@@ -73,3 +75,328 @@ int asciitoutf16(const uint8_t* ascii, uint16_t* utf16)
+ 
+ 	return TRUE;
+ }
++
++/**
++ * Convert a null-terminated string into an UTF-16 null-terminated
++ * string.
++ * The UTF-16 string is supposed to be, at least, (strlen(ascii)+1)*2 long.
++ *
++ * @param inbuffer  A null-terminated string (encoding depends on locale)
++ * @param outbuffer The UTF-16 string resulted from the conversion
++ * @return TRUE if result can be trusted, FALSE otherwise
++ */
++int toutf16(const uint8_t* inbuffer, uint8_t* outbuffer)
++{
++	iconv_t cd;                              /* Conversion descriptor          */
++	char* inptr;                             /* Pointer used for input buffer  */
++	char* outptr;                            /* Pointer used for output buffer */
++	int rc;                                  /* Return code of iconv()         */
++
++	char* incharset      = NULL;
++	char* outcharset     = "UTF-16LE";
++
++	if(!inbuffer || !outbuffer)
++		return FALSE;
++
++	size_t lenib = strlen((char*)inbuffer);
++	size_t lenob = (lenib+1)*2;
++
++	/* Get the character set from environment */
++	incharset = getlocalcharset();
++	if (!incharset) {
++		dis_printf(L_ERROR, "Could not detect locale, aborting.\n");
++		return FALSE;
++	}
++	dis_printf(L_DEBUG, "Current character set is: %s\n", incharset);
++
++	/* Allocate descriptor for character set conversion */
++	if ((cd = iconv_open(outcharset, incharset)) == (iconv_t)(-1)) {
++		dis_printf(
++			L_ERROR,
++			"Cannot allocate descriptor for conversion from %s to %s, aborting.\n",
++			incharset, outcharset
++		);
++		free(incharset);
++		return FALSE;
++	}
++
++	/* Pointers to in and out buffers */
++	inptr = (char*)inbuffer;
++	outptr = (char*)outbuffer;
++
++	/* Clean the out buffer */
++	memset(outbuffer, 0, lenob);
++
++	/* Convert string from incharset to UTF-16LE */
++	rc = (int)iconv(cd, &inptr, &lenib, &outptr, &lenob);
++	if (rc == -1) {
++		dis_printf(
++			L_ERROR,
++			"Error in converting characters from %s to %s, aborting.\n",
++			incharset, outcharset
++		);
++		free(incharset);
++		return FALSE;
++	}
++
++	/* Deallocate descriptor for character conversion */
++	iconv_close(cd);
++
++	free(incharset);
++
++	return TRUE;
++}
++
++/**
++ * Get the character set from the environment
++ *
++ * @return A string with the character set, NULL otherwise
++ */
++char* getlocalcharset() {
++	char*  cl                  = NULL;
++	char*  current_locale      = NULL;
++	char*  nl                  = NULL;
++	char*  new_locale          = NULL;
++	char*  local_charset       = NULL;
++	int    local_charset_index, i;
++	char** character_sets_list = NULL;
++
++	/*
++	 * Get program's current locale: it is "C" when it has not been modified before
++	 * But we need it in order to set it back after getting the locale from the environment
++	 */
++	cl = setlocale(LC_ALL, NULL);
++	current_locale = (char*) malloc (strlen(cl)+1);
++	if (!current_locale) {
++		dis_printf(L_ERROR, "Could not allocate memory for current locale.\n");
++		return NULL;
++	}
++	/* A copy, otherwise not possible to set the locale back to original value */
++	strcpy(current_locale, cl);
++	dis_printf(L_DEBUG, "Program's locale: %s\n", current_locale);
++
++	/* Set the locale from environment */
++	setlocale(LC_ALL, "");
++
++	/* Get program's new locale: now the environment's locale */
++	nl = setlocale(LC_ALL, NULL);
++	new_locale = (char*) malloc (strlen(nl)+1);
++	if (!new_locale) {
++		dis_printf(L_ERROR, "Could not allocate memory for new locale.\n");
++		/* Sets program's original locale */
++		setlocale(LC_ALL, current_locale);
++		free(current_locale);
++		return NULL;
++	}
++	/* A copy, otherwise not possible to use it */
++	strcpy(new_locale, nl);
++	dis_printf(L_DEBUG, "Environment's locale: %s\n", new_locale);
++
++	/* Sets program's original locale */
++	setlocale(LC_ALL, current_locale);
++	free(current_locale);
++
++
++	/* Gets the list of valid character sets */
++	character_sets_list=buildcharactersetslist();
++
++
++	/* Search for valid character set in environment's locale
++	 * A list of valid character sets is provided by command "iconv -l" in the command line
++	 * This list is used to find the character set of the environment's locale
++	 */
++	i = 0;
++	local_charset_index = -1;
++	/* Loop over all valid character sets */
++	while (strcmp(character_sets_list[i], "DISLOCKER-END_OF_LIST") != 0) {
++		/* If a valid character set is found */
++		if (strstr(new_locale, character_sets_list[i])) {
++			/* If no valid character set has been found before */
++			if (local_charset_index < 0) {
++				/* Set the current character set */
++				dis_printf(L_DEBUG, "A possible character set was found: %s\n", character_sets_list[i]);
++				local_charset_index = i;
++			}
++			/* A valid charset have been found before, but was it the correct one? */
++			else
++				/* Verify if a new valid character set is found */
++				if (strlen(character_sets_list[i]) >= strlen(character_sets_list[local_charset_index])) {
++					/* Set the current character set */
++					dis_printf(L_DEBUG, "A new possible character set was found: %s\n", character_sets_list[i]);
++					local_charset_index = i;
++				}
++		}
++		i++;
++	}
++	/* Not needed anymore */
++	free(new_locale);
++
++	/* Check if a valid character set was found */
++	if (local_charset_index < 0) {
++		dis_printf(L_ERROR, "Could not find any valid character set.\n");
++		return NULL;
++	}
++
++	/* Copy the valid character set */
++	local_charset = (char*) malloc (strlen(character_sets_list[local_charset_index])+1);
++	if (!local_charset) {
++		dis_printf(L_ERROR, "Could not allocate memory for local character set.\n");
++		return NULL;
++	}
++	/* A copy, otherwise not possible to use it */
++	strcpy(local_charset, character_sets_list[local_charset_index]);
++
++	return local_charset;
++}
++
++char** buildcharactersetslist(void) {
++	/*
++	 * List of all character sets supported by iconv
++	 */
++	static char *character_sets_list[] = {
++		"ANSI_X3.4-1968", "ANSI_X3.4-1986", "ASCII", "CP367", "IBM367", "ISO-IR-6", "ISO646-US", "ISO_646.IRV:1991", "US", "US-ASCII", "CSASCII",
++		"UTF-8", "UTF8",
++		"UTF-8-MAC", "UTF8-MAC",
++		"ISO-10646-UCS-2", "UCS-2", "CSUNICODE",
++		"UCS-2BE", "UNICODE-1-1", "UNICODEBIG", "CSUNICODE11",
++		"UCS-2LE", "UNICODELITTLE",
++		"ISO-10646-UCS-4", "UCS-4", "CSUCS4",
++		"UCS-4BE",
++		"UCS-4LE",
++		"UTF-16",
++		"UTF-16BE",
++		"UTF-16LE",
++		"UTF-32",
++		"UTF-32BE",
++		"UTF-32LE",
++		"UNICODE-1-1-UTF-7", "UTF-7", "CSUNICODE11UTF7",
++		"UCS-2-INTERNAL",
++		"UCS-2-SWAPPED",
++		"UCS-4-INTERNAL",
++		"UCS-4-SWAPPED",
++		"C99",
++		"JAVA",
++		"CP819", "IBM819", "ISO-8859-1", "ISO-IR-100", "ISO8859-1", "ISO_8859-1", "ISO_8859-1:1987", "L1", "LATIN1", "CSISOLATIN1",
++		"ISO-8859-2", "ISO-IR-101", "ISO8859-2", "ISO_8859-2", "ISO_8859-2:1987", "L2", "LATIN2", "CSISOLATIN2",
++		"ISO-8859-3", "ISO-IR-109", "ISO8859-3", "ISO_8859-3", "ISO_8859-3:1988", "L3", "LATIN3", "CSISOLATIN3",
++		"ISO-8859-4", "ISO-IR-110", "ISO8859-4", "ISO_8859-4", "ISO_8859-4:1988", "L4", "LATIN4", "CSISOLATIN4",
++		"CYRILLIC", "ISO-8859-5", "ISO-IR-144", "ISO8859-5", "ISO_8859-5", "ISO_8859-5:1988", "CSISOLATINCYRILLIC",
++		"ARABIC", "ASMO-708", "ECMA-114", "ISO-8859-6", "ISO-IR-127", "ISO8859-6", "ISO_8859-6", "ISO_8859-6:1987", "CSISOLATINARABIC",
++		"ECMA-118", "ELOT_928", "GREEK", "GREEK8", "ISO-8859-7", "ISO-IR-126", "ISO8859-7", "ISO_8859-7", "ISO_8859-7:1987", "ISO_8859-7:2003", "CSISOLATINGREEK",
++		"HEBREW", "ISO-8859-8", "ISO-IR-138", "ISO8859-8", "ISO_8859-8", "ISO_8859-8:1988", "CSISOLATINHEBREW",
++		"ISO-8859-9", "ISO-IR-148", "ISO8859-9", "ISO_8859-9", "ISO_8859-9:1989", "L5", "LATIN5", "CSISOLATIN5",
++		"ISO-8859-10", "ISO-IR-157", "ISO8859-10", "ISO_8859-10", "ISO_8859-10:1992", "L6", "LATIN6", "CSISOLATIN6",
++		"ISO-8859-11", "ISO8859-11", "ISO_8859-11",
++		"ISO-8859-13", "ISO-IR-179", "ISO8859-13", "ISO_8859-13", "L7", "LATIN7",
++		"ISO-8859-14", "ISO-CELTIC", "ISO-IR-199", "ISO8859-14", "ISO_8859-14", "ISO_8859-14:1998", "L8", "LATIN8",
++		"ISO-8859-15", "ISO-IR-203", "ISO8859-15", "ISO_8859-15", "ISO_8859-15:1998", "LATIN-9",
++		"ISO-8859-16", "ISO-IR-226", "ISO8859-16", "ISO_8859-16", "ISO_8859-16:2001", "L10", "LATIN10",
++		"KOI8-R", "CSKOI8R",
++		"KOI8-U",
++		"KOI8-RU",
++		"CP1250", "MS-EE", "WINDOWS-1250",
++		"CP1251", "MS-CYRL", "WINDOWS-1251",
++		"CP1252", "MS-ANSI", "WINDOWS-1252",
++		"CP1253", "MS-GREEK", "WINDOWS-1253",
++		"CP1254", "MS-TURK", "WINDOWS-1254",
++		"CP1255", "MS-HEBR", "WINDOWS-1255",
++		"CP1256", "MS-ARAB", "WINDOWS-1256",
++		"CP1257", "WINBALTRIM", "WINDOWS-1257",
++		"CP1258", "WINDOWS-1258",
++		"850", "CP850", "IBM850", "CSPC850MULTILINGUAL",
++		"862", "CP862", "IBM862", "CSPC862LATINHEBREW",
++		"866", "CP866", "IBM866", "CSIBM866",
++		"MAC", "MACINTOSH", "MACROMAN", "CSMACINTOSH",
++		"MACCENTRALEUROPE",
++		"MACICELAND",
++		"MACCROATIAN",
++		"MACROMANIA",
++		"MACCYRILLIC",
++		"MACUKRAINE",
++		"MACGREEK",
++		"MACTURKISH",
++		"MACHEBREW",
++		"MACARABIC",
++		"MACTHAI",
++		"HP-ROMAN8", "R8", "ROMAN8", "CSHPROMAN8",
++		"NEXTSTEP",
++		"ARMSCII-8",
++		"GEORGIAN-ACADEMY",
++		"GEORGIAN-PS",
++		"KOI8-T",
++		"CP154", "CYRILLIC-ASIAN", "PT154", "PTCP154", "CSPTCP154",
++		"MULELAO-1",
++		"CP1133", "IBM-CP1133",
++		"ISO-IR-166", "TIS-620", "TIS620", "TIS620-0", "TIS620.2529-1", "TIS620.2533-0", "TIS620.2533-1",
++		"CP874", "WINDOWS-874",
++		"VISCII", "VISCII1.1-1", "CSVISCII",
++		"TCVN", "TCVN-5712", "TCVN5712-1", "TCVN5712-1:1993",
++		"ISO-IR-14", "ISO646-JP", "JIS_C6220-1969-RO", "JP", "CSISO14JISC6220RO",
++		"JISX0201-1976", "JIS_X0201", "X0201", "CSHALFWIDTHKATAKANA",
++		"ISO-IR-87", "JIS0208", "JIS_C6226-1983", "JIS_X0208", "JIS_X0208-1983", "JIS_X0208-1990", "X0208", "CSISO87JISX0208",
++		"ISO-IR-159", "JIS_X0212", "JIS_X0212-1990", "JIS_X0212.1990-0", "X0212", "CSISO159JISX02121990",
++		"CN", "GB_1988-80", "ISO-IR-57", "ISO646-CN", "CSISO57GB1988",
++		"CHINESE", "GB_2312-80", "ISO-IR-58", "CSISO58GB231280",
++		"CN-GB-ISOIR165", "ISO-IR-165",
++		"ISO-IR-149", "KOREAN", "KSC_5601", "KS_C_5601-1987", "KS_C_5601-1989", "CSKSC56011987",
++		"EUC-JP", "EUCJP", "EXTENDED_UNIX_CODE_PACKED_FORMAT_FOR_JAPANESE", "CSEUCPKDFMTJAPANESE",
++		"MS_KANJI", "SHIFT-JIS", "SHIFT_JIS", "SJIS", "CSSHIFTJIS",
++		"CP932",
++		"ISO-2022-JP", "CSISO2022JP",
++		"ISO-2022-JP-1",
++		"ISO-2022-JP-2", "CSISO2022JP2",
++		"CN-GB", "EUC-CN", "EUCCN", "GB2312", "CSGB2312",
++		"GBK",
++		"CP936", "MS936", "WINDOWS-936",
++		"GB18030",
++		"ISO-2022-CN", "CSISO2022CN",
++		"ISO-2022-CN-EXT",
++		"HZ", "HZ-GB-2312",
++		"EUC-TW", "EUCTW", "CSEUCTW",
++		"BIG-5", "BIG-FIVE", "BIG5", "BIGFIVE", "CN-BIG5", "CSBIG5",
++		"CP950",
++		"BIG5-HKSCS:1999",
++		"BIG5-HKSCS:2001",
++		"BIG5-HKSCS", "BIG5-HKSCS:2004", "BIG5HKSCS",
++		"EUC-KR", "EUCKR", "CSEUCKR",
++		"CP949", "UHC",
++		"CP1361", "JOHAB",
++		"ISO-2022-KR", "CSISO2022KR",
++		"CP856",
++		"CP922",
++		"CP943",
++		"CP1046",
++		"CP1124",
++		"CP1129",
++		"CP1161", "IBM-1161", "IBM1161", "CSIBM1161",
++		"CP1162", "IBM-1162", "IBM1162", "CSIBM1162",
++		"CP1163", "IBM-1163", "IBM1163", "CSIBM1163",
++		"DEC-KANJI",
++		"DEC-HANYU",
++		"437", "CP437", "IBM437", "CSPC8CODEPAGE437",
++		"CP737",
++		"CP775", "IBM775", "CSPC775BALTIC",
++		"852", "CP852", "IBM852", "CSPCP852",
++		"CP853",
++		"855", "CP855", "IBM855", "CSIBM855",
++		"857", "CP857", "IBM857", "CSIBM857",
++		"CP858",
++		"860", "CP860", "IBM860", "CSIBM860",
++		"861", "CP-IS", "CP861", "IBM861", "CSIBM861",
++		"863", "CP863", "IBM863", "CSIBM863",
++		"CP864", "IBM864", "CSIBM864",
++		"865", "CP865", "IBM865", "CSIBM865",
++		"869", "CP-GR", "CP869", "IBM869", "CSIBM869",
++		"CP1125",
++		"EUC-JISX0213",
++		"SHIFT_JISX0213",
++		"ISO-2022-JP-3",
++		"BIG5-2003",
++		"ISO-IR-230", "TDS565",
++		"ATARI", "ATARIST",
++		"RISCOS-LATIN1",
++		"DISLOCKER-END_OF_LIST"
++	};
++
++	return character_sets_list;
++}
+diff --git a/src/samples/metadata_from_userpass.rb b/src/samples/metadata_from_userpass.rb
+index 65c00a5..209b219 100644
+--- a/src/samples/metadata_from_userpass.rb
++++ b/src/samples/metadata_from_userpass.rb
+@@ -51,4 +51,3 @@ fvek = disaccess.fvek
+ 
+ puts ". FVEK found:"
+ puts fvek
+-
+diff --git a/src/xstd/xstdio.c b/src/xstd/xstdio.c
+index 50c8045..28fabf5 100644
+--- a/src/xstd/xstdio.c
++++ b/src/xstd/xstdio.c
+@@ -250,4 +250,3 @@ int dis_vprintf(DIS_LOGS level, const char* format, va_list ap)
+ 	fprintf(fds[level], "%s [%s] ", time2string, msg_tab[level]);
+ 	return vfprintf(fds[level], format, ap);
+ }
+-
+diff --git a/src/xstd/xstdlib.c b/src/xstd/xstdlib.c
+index a5c3552..f6617b4 100644
+--- a/src/xstd/xstdlib.c
++++ b/src/xstd/xstdlib.c
+@@ -65,5 +65,3 @@ void dis_free(void *pointer)
+ 
+ 	free(pointer);
+ }
+-
+-
